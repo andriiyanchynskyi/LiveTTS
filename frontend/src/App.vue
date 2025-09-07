@@ -93,7 +93,13 @@
             Original Language: {{ getLanguageDisplayName(voice.language) }}
           </p>
           <p style="margin: 0 0 8px 0; color: #666; font-size: 14px;">
-            Supported Languages: {{ (voice.model_supported_languages || availableLanguages).map(lang => getLanguageDisplayName(lang)).join(', ') }}
+            Supported Languages:
+{{
+  ((voice.supported_languages && voice.supported_languages.length ? voice.supported_languages
+    : (voice.m_supported_languages || availableLanguages)))
+    .map(lang => getLanguageDisplayName(lang))
+    .join(', ')
+}}
           </p>
           <p v-if="voice.fixed_language" style="margin: 0 0 8px 0; color: #dc3545; font-size: 12px;">
             ⚠️ Fixed Language: {{ getLanguageDisplayName(voice.fixed_language) }}
@@ -157,41 +163,26 @@ const refreshing = ref(false)
 const errorMessage = ref('')
 const systemStatus = ref('Loading...')
 const gpuInfo = ref({})
-const debugInfo = ref(true)
 const availableLanguages = ref([])
 
 // API Functions
 async function loadLanguages() {
   try {
-    console.log('Loading languages from:', `${apiBase}/languages`)
     const { data } = await axios.get(`${apiBase}/languages`)
-    console.log('Languages response:', data)
-    availableLanguages.value = data.languages && data.languages.length > 0 ? data.languages : ['en']
-    console.log('Loaded languages:', availableLanguages.value)
+    availableLanguages.value = Array.isArray(data.languages) && data.languages.length ? data.languages : ['en']
   } catch (e) {
-    console.error('Failed to load languages:', e)
     errorMessage.value = 'Failed to load languages: ' + (e.response?.data?.detail || e.message)
-    availableLanguages.value = ['en'] // Fallback to English
+    availableLanguages.value = ['en']
   }
 }
 
 async function loadVoices() {
   try {
-    console.log('Loading voices from:', `${apiBase}/voices`)
     const { data } = await axios.get(`${apiBase}/voices`)
-    console.log('Voices response:', data)
     voices.value = data.voices || []
-    
-    console.log('Loaded voices:', voices.value)
-    
-    if (voices.value.length > 0 && !selectedVoice.value) {
-      selectedVoice.value = voices.value[0]
-      console.log('Auto-selected voice:', selectedVoice.value)
-    }
-    
+    if (voices.value.length > 0 && !selectedVoice.value) selectedVoice.value = voices.value
     systemStatus.value = 'Ready'
   } catch (e) {
-    console.error('Failed to load voices:', e)
     errorMessage.value = 'Failed to load voices: ' + (e.response?.data?.detail || e.message)
     systemStatus.value = 'Error'
   }
@@ -221,58 +212,30 @@ async function diagGpu() {
 }
 
 // Computed Properties
-const filteredVoices = computed(() => {
-  if (!selectedLanguage.value) return voices.value
-  return voices.value.filter(voice => voice.language === selectedLanguage.value)
-})
-
 const availableLanguagesForVoice = computed(() => {
   if (!selectedVoice.value) return []
-  
-  // If the voice has a fixed language in config, only show that language
-  if (selectedVoice.value.fixed_language) {
-    return [selectedVoice.value.fixed_language]
-  }
-  
-  // Use model_supported_languages if available, otherwise fallback to all available languages
-  const supported = selectedVoice.value.model_supported_languages || []
-  
-  // If no languages are specified in the model, use all available languages
-  if (supported.length === 0) {
-    return availableLanguages.value.length > 0 ? availableLanguages.value : ['en']
-  }
-  
-  return supported
+  if (selectedVoice.value.fixed_language) return [selectedVoice.value.fixed_language]
+  const supported = selectedVoice.value.supported_languages?.length ? selectedVoice.value.supported_languages : (selectedVoice.value.m_supported_languages || [])
+  return supported.length ? supported : (availableLanguages.value.length ? availableLanguages.value : ['en'])
 })
 
 const isReadyForSynthesis = computed(() => {
-  return selectedVoice.value &&
-         selectedLanguage.value &&
-         selectedLanguage.value.trim() !== '' &&
-         availableLanguagesForVoice.value.includes(selectedLanguage.value) &&
-         text.value.trim() !== ''
+  return Boolean(
+    selectedVoice.value &&
+    selectedLanguage.value &&
+    selectedLanguage.value.trim() !== '' &&
+    availableLanguagesForVoice.value.includes(selectedLanguage.value) &&
+    text.value.trim() !== ''
+  )
 })
 
 // Watchers
-watch(selectedVoice, (newVoice, oldVoice) => {
-  console.log('Voice changed from:', oldVoice, 'to:', newVoice)
-  
-  // Reset selected language when voice changes
+watch(selectedVoice, (newVoice) => {
   selectedLanguage.value = ''
-  
   if (newVoice) {
-    // Wait for next tick to ensure availableLanguagesForVoice is updated
     nextTick(() => {
-      const availableLangs = availableLanguagesForVoice.value
-      if (availableLangs.length > 0) {
-        // If voice has fixed language, use it; otherwise use first available
-        selectedLanguage.value = newVoice.fixed_language || availableLangs[0]
-        console.log('Auto-selected language for voice:', selectedLanguage.value)
-      } else {
-        // Fallback to 'en' if no languages are available
-        selectedLanguage.value = 'en'
-        console.log('No language available for voice, defaulting to English:', newVoice.name)
-      }
+      const langs = availableLanguagesForVoice.value
+      selectedLanguage.value = newVoice.fixed_language || (langs.length ? langs : 'en')
     })
   }
 })
@@ -298,7 +261,7 @@ function getLanguageDisplayName(langCode) {
     'ja': 'Japanese',
     'hi': 'Hindi'
   }
-  return languageNames[langCode] || langCode.toUpperCase()
+  return languageNames[langCode] || String(langCode).toUpperCase()
 }
 
 async function synthesize() {
@@ -314,10 +277,6 @@ async function synthesize() {
     return
   }
   
-  console.log('Synthesizing with voice:', selectedVoice.value)
-  console.log('Synthesizing with language:', selectedLanguage.value)
-  console.log('Text:', text.value)
-  
   loading.value = true
   audioUrl.value = ''
   filename.value = ''
@@ -330,13 +289,7 @@ async function synthesize() {
       language: selectedLanguage.value
     }
     
-    console.log('Sending payload:', payload)
-    console.log('Payload language type:', typeof payload.language)
-    console.log('Payload language length:', payload.language ? payload.language.length : 'undefined')
-    console.log('Payload language trimmed:', payload.language ? payload.language.trim() : 'undefined')
-    
     const { data } = await axios.post(`${apiBase}/synthesize`, payload)
-    console.log('Synthesis response:', data)
     
     audioUrl.value = data.audio_url
     filename.value = data.filename
@@ -355,24 +308,11 @@ async function synthesize() {
 onMounted(async () => {
   await loadLanguages()
   await loadVoices()
-  diagGpu()
-  
-  // Ensure we have a voice selected and set initial language
-  if (voices.value.length > 0 && !selectedVoice.value) {
-    selectedVoice.value = voices.value[0]
-    console.log('Auto-selected voice:', selectedVoice.value)
-  }
-  
-  // Set initial language based on selected voice
+  await diagGpu()
+  if (voices.value.length > 0 && !selectedVoice.value) selectedVoice.value = voices.value
   if (selectedVoice.value && !selectedLanguage.value) {
-    const availableLangs = availableLanguagesForVoice.value
-    if (availableLangs.length > 0) {
-      selectedLanguage.value = selectedVoice.value.fixed_language || availableLangs[0]
-      console.log('Auto-selected language for voice:', selectedLanguage.value)
-    } else {
-      selectedLanguage.value = 'en'
-      console.log('No language available for voice, defaulting to English:', selectedVoice.value.name)
-    }
+    const langs = availableLanguagesForVoice.value
+    selectedLanguage.value = selectedVoice.value.fixed_language || (langs.length ? langs : 'en')
   }
 })
 </script>
