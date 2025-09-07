@@ -21,21 +21,10 @@ WORKDIR /app
 COPY requirements.txt .
 RUN python -m pip install --upgrade pip && pip install -r requirements.txt
 
-
-
-ARG PRELOAD_MODEL="tts_models/en/ljspeech/vits"
-RUN python - << 'PY'
-from TTS.api import TTS
-import os
-model_name = os.getenv("PRELOAD_MODEL", "tts_models/en/ljspeech/vits")
-TTS(model_name)
-PY
-
-
 COPY app ./app
 
 
-RUN mkdir -p /app/volumes/outputs
+RUN mkdir -p /app/volumes/outputs /app/volumes/voices
 
 EXPOSE 8000
 
