@@ -146,6 +146,7 @@
 <script setup>
 import axios from 'axios'
 import { ref, onMounted, computed, watch, nextTick } from 'vue'
+import './styles.css'
 
 // API Configuration
 const apiBase = import.meta.env.VITE_API_BASE || 'http://localhost:8000'
@@ -316,104 +317,3 @@ onMounted(async () => {
   }
 })
 </script>
-
-<style>
-/* Minimalistic button styles with custom color */
-.synthesize-btn {
-  padding: 12px 20px;
-  border: none;
-  border-radius: 6px;
-  background-color: rgb(246, 192, 80);
-  color: white;
-  font-size: 16px;
-  font-weight: 500;
-  cursor: pointer;
-  transition: all 0.2s ease;
-  min-width: 160px;
-  height: 50px;
-}
-
-.synthesize-btn:hover:not(:disabled) {
-  background-color: rgb(240, 180, 70);
-  transform: translateY(-1px);
-}
-
-.synthesize-btn:disabled {
-  background-color: #ccc;
-  cursor: not-allowed;
-  transform: none;
-}
-
-.refresh-btn {
-  padding: 8px 16px;
-  border: none;
-  border-radius: 6px;
-  background-color: rgb(246, 192, 80);
-  color: white;
-  font-size: 14px;
-  font-weight: 500;
-  cursor: pointer;
-  transition: all 0.2s ease;
-}
-
-.refresh-btn:hover:not(:disabled) {
-  background-color: rgb(240, 180, 70);
-  transform: translateY(-1px);
-}
-
-.refresh-btn:disabled {
-  background-color: #ccc;
-  cursor: not-allowed;
-  transform: none;
-}
-
-.selected-badge {
-  margin-top: 8px;
-  padding: 4px 8px;
-  background-color: rgb(246, 192, 80);
-  color: white;
-  border-radius: 4px;
-  font-size: 12px;
-  display: inline-block;
-  font-weight: 500;
-}
-
-/* Enhanced styling */
-select, input, textarea {
-  font-family: inherit;
-}
-
-select:disabled {
-  background-color: #f8f9fa;
-  color: #6c757d;
-  cursor: not-allowed;
-}
-
-/* Responsive design */
-@media (max-width: 768px) {
-  main {
-    margin: 12px;
-    max-width: none;
-  }
-  
-  .flex-wrap {
-    flex-direction: column;
-    align-items: stretch;
-  }
-  
-  .grid {
-    grid-template-columns: 1fr;
-  }
-  
-  .synthesize-btn {
-    width: 100%;
-    margin-top: 12px;
-  }
-}
-
-/* Voice selection animation */
-.voice-card:hover {
-  transform: translateY(-2px);
-  box-shadow: 0 4px 8px rgba(0,0,0,0.1);
-}
-</style>
