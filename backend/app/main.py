@@ -34,6 +34,13 @@ SUPPORTED_LANGUAGES = [
     "en","es","fr","de","it","pt","pl","tr","ru","nl","cs","ar","zh-cn","hu","ko","ja"
 ]  
 
+INFERENCE_DEFAULTS = {
+    "temperature": 0.75,
+    "length_penalty": 1.0,
+    "repetition_penalty": 5.0,
+    "top_k": 50,
+    "top_p": 0.85
+}
 # ----------------- Schemas -----------------
 class VoiceModel(BaseModel):
     name: str = Field(..., description="Voice name (folder)")
@@ -73,6 +80,13 @@ def _normalize_path(p: str) -> str:
         return p.replace("/", "\\")
     return p
 
+def get_inference_param(param_name: str, voice_cfg: dict, defaults: dict):
+    value = voice_cfg.get(param_name)
+    # If value is missing, None, empty string or invalid number
+    if value is None or value == '' or (isinstance(value, (int, float)) and value <= 0):
+        return defaults[param_name]
+    return value
+
 def _load_voice_config(config_path: str) -> dict:
     try:
         with open(config_path, "r", encoding="utf-8") as cf:
@@ -84,7 +98,7 @@ def _validate_language(lang: Optional[str], voice_cfg: dict) -> str:
     supported = [l.lower() for l in voice_cfg.get("languages", SUPPORTED_LANGUAGES)]
     eff = (lang or "en").strip().lower()
     if eff not in supported:
-        eff = supported
+        eff = supported[0]
     return eff
 
 def _load_xtts_m_for_voice(config_path: str, m_path: str, vocab_path: str) -> Xtts:
@@ -300,26 +314,25 @@ async def synthesize_text(request: SynthesisRequest):
     # Extract conditioning latents from reference.wav
     gpt_cond_latent, speaker_embedding = model.get_conditioning_latents(audio_path=[str(ref)])  # mandatory step
 
-    # Inference parameters — could be omitted (they would be read from config.json),
-    # but we pass them explicitly for clarity.
-    temperature = voice_cfg.get("temperature", 0.75)
-    length_penalty = voice_cfg.get("length_penalty", 1.0)
-    repetition_penalty = voice_cfg.get("repetition_penalty", 5.0)
-    top_k = voice_cfg.get("top_k", 50)
-    top_p = voice_cfg.get("top_p", 0.85)
-
+    # Inference parameters — could be omitted, but using fallback to defaults if missing or invalid
+ 
+    params = {}
+    for param_name in INFERENCE_DEFAULTS:
+        params[param_name] = get_inference_param(param_name, voice_cfg, INFERENCE_DEFAULTS)
+ 
     out = model.inference(
         request.text,
         effective_lang,
         gpt_cond_latent,
         speaker_embedding,
-        temperature=temperature,
-        length_penalty=length_penalty,
-        repetition_penalty=repetition_penalty,
-        top_k=top_k,
-        top_p=top_p,
+        temperature=params["temperature"],
+        length_penalty=params["length_penalty"],
+        repetition_penalty=params["repetition_penalty"],
+        top_k=params["top_k"],
+        top_p=params["top_p"],
         enable_text_splitting=True
     )
+
 
     wav = out.get("wav")
     if wav is None:
