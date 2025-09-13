@@ -1,4 +1,8 @@
 /* Minimalistic button styles with custom color */
+.app-title {
+  font-style: italic;
+}
+
 .synthesize-btn {
   padding: 12px 20px;
   border: none;
@@ -9,8 +13,10 @@
   font-weight: 500;
   cursor: pointer;
   transition: all 0.2s ease;
-  min-width: 160px;
-  height: 50px;
+  width: 140px;
+  height: 40px;
+  flex-shrink: 0;
+  margin-left: 16px;
 }
 
 .synthesize-btn:hover:not(:disabled) {
@@ -30,10 +36,13 @@
   border-radius: 6px;
   background-color: rgb(246, 192, 80);
   color: white;
-  font-size: 14px;
+  font-size: 16px;
   font-weight: 500;
   cursor: pointer;
   transition: all 0.2s ease;
+  width: 140px;
+  height: 40px;
+  flex-shrink: 0;
 }
 
 .refresh-btn:hover:not(:disabled) {
@@ -53,9 +62,28 @@
   background-color: rgb(246, 192, 80);
   color: white;
   border-radius: 4px;
-  font-size: 12px;
+  font-size: 14px;
   display: inline-block;
   font-weight: 500;
+}
+
+.download-btn {
+  padding: 8px 16px;
+  background-color: rgb(240, 180, 70);
+  color: white;
+  text-decoration: none;
+  border-radius: 6px;
+  font-size: 16px;
+  font-weight: 500;
+  transition: all 0.2s ease;
+  display: inline-block;
+  text-align: center;
+  line-height: 24px;
+}
+
+.download-btn:hover {
+  background-color: rgb(246, 192, 80);
+  transform: translateY(-1px);
 }
 
 /* Enhanced styling */
@@ -95,4 +123,47 @@ select:disabled {
 .voice-card:hover {
   transform: translateY(-2px);
   box-shadow: 0 4px 8px rgba(0,0,0,0.1);
+}
+
+
+/* Range input */
+input[type="range"] {
+  -webkit-appearance: none;
+  appearance: none;
+  background: transparent;
+  cursor: pointer;
+}
+
+input[type="range"]::-webkit-slider-track {
+  height: 6px;
+  background: #ddd;
+  border-radius: 3px;
+}
+
+input[type="range"]::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  height: 20px;
+  width: 20px;
+  border-radius: 50%;
+  background: rgb(246, 192, 80);
+  cursor: pointer;
+  border: 2px solid white;
+  box-shadow: 0 2px 4px rgba(0,0,0,0.2);
+}
+
+input[type="range"]::-moz-range-track {
+  height: 6px;
+  background: #ddd;
+  border-radius: 3px;
+  border: none;
+}
+
+input[type="range"]::-moz-range-thumb {
+  height: 20px;
+  width: 20px;
+  border-radius: 50%;
+  background: rgb(246, 192, 80);
+  cursor: pointer;
+  border: 2px solid white;
+  box-shadow: 0 2px 4px rgba(0,0,0,0.2);
 }

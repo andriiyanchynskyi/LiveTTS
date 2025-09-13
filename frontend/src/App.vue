@@ -1,6 +1,6 @@
 <template>
-  <main style="max-width: 1000px; margin: 24px auto; font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif;">
-    <h1>LiveTTS</h1>
+  <main style="max-width: 1000px; margin: 24px auto; font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif; ">
+    <h1 class="app-title">LiveTTS</h1>
 
     <!-- Text Synthesis Section -->
     <section style="margin: 16px 0; padding: 16px; border: 1px solid #ddd; border-radius: 12px;">
@@ -15,8 +15,8 @@
       <div style="display: flex; gap: 16px; margin-top: 16px; align-items: end; flex-wrap: wrap;">
         <div style="flex: 1; min-width: 200px;">
           <label style="display: block; font-weight: 600; margin-bottom: 6px;">Select Language</label>
-          <select v-model="selectedLanguage" style="padding: 12px; border: 1px solid #ccc; border-radius: 4px; width: 55%; font-size: 16px;" :disabled="!selectedVoice">
-            <option value="">{{ selectedVoice ? 'Choose a language...' : 'Select a voice first' }}</option>
+          <select v-model="selectedLanguage" style="padding: 12px; border: 1px solid #ccc; border-radius: 4px; width: 55%; font-size: 16px; text-align: center;  font-style: italic;" :disabled="!selectedVoice">
+            <option value="">{{ selectedVoice ? 'Language' : 'Set voice' }}</option>
             <option v-for="lang in availableLanguagesForVoice" :key="lang" :value="lang">
               {{ getLanguageDisplayName(lang) }}
             </option>
@@ -24,12 +24,30 @@
         </div>
         <div style="flex: 1; min-width: 200px;">
           <label style="display: block; font-weight: 600; margin-bottom: 6px;">Select Voice</label>
-          <select v-model="selectedVoice" style="padding: 12px; border: 1px solid #ccc; border-radius: 4px; width: 55%; font-size: 16px;">
-            <option value="">Choose a voice...</option>
+          <select v-model="selectedVoice" style="padding: 12px; border: 1px solid #ccc; border-radius: 4px; width: 55%; font-size: 16px;  font-style: italic;">
+            <option value="">Not Selected</option>
             <option v-for="voice in voices" :key="voice.name" :value="voice">
               {{ voice.name }} (Original: {{ getLanguageDisplayName(voice.language) }})
             </option>
           </select>
+        </div>
+
+        <div style="flex: 1; min-width: 200px;">
+          <label style="display: block; font-weight: 600; margin-bottom: 6px;">
+            Playback Speed: {{ speed.toFixed(1) }}x
+          </label>
+          <div style="display: flex; align-items: center; gap: 8px;">
+            <span style="font-size: 12px; color: #666;">0.5x</span>
+            <input 
+              type="range" 
+              v-model.number="speed" 
+              min="0.5" 
+              max="2.0" 
+              step="0.1" 
+              style="flex: 1; height: 6px; border-radius: 3px; outline: none;"
+            />
+            <span style="font-size: 12px; color: #666;">2.0x</span>
+          </div>
         </div>
 
         <button 
@@ -57,8 +75,8 @@
       <audio :src="apiBase + audioUrl" controls style="width: 100%;"></audio>
       <div style="margin-top: 12px;">
         <a :href="apiBase + audioUrl" :download="filename" 
-           style="padding: 8px 16px; background-color: #007bff; color: white; text-decoration: none; border-radius: 4px;">
-          Download WAV
+           class="download-btn">
+          Download
         </a>
       </div>
     </section>
@@ -165,6 +183,7 @@ const errorMessage = ref('')
 const systemStatus = ref('Loading...')
 const gpuInfo = ref({})
 const availableLanguages = ref([])
+const speed = ref(1.0)
 
 // API Functions
 async function loadLanguages() {
@@ -181,7 +200,10 @@ async function loadVoices() {
   try {
     const { data } = await axios.get(`${apiBase}/voices`)
     voices.value = data.voices || []
-    if (voices.value.length > 0 && !selectedVoice.value) selectedVoice.value = voices.value
+    // Only auto-select first voice if voices are actually available
+    if (voices.value.length > 0 && !selectedVoice.value) {
+      selectedVoice.value = voices.value[0]  // Select first voice, not the entire array
+    }
     systemStatus.value = 'Ready'
   } catch (e) {
     errorMessage.value = 'Failed to load voices: ' + (e.response?.data?.detail || e.message)
@@ -287,7 +309,8 @@ async function synthesize() {
     const payload = {
       text: text.value,
       voice_name: selectedVoice.value.name,
-      language: selectedLanguage.value
+      language: selectedLanguage.value,
+      speed: speed.value
     }
     
     const { data } = await axios.post(`${apiBase}/synthesize`, payload)
@@ -310,10 +333,14 @@ onMounted(async () => {
   await loadLanguages()
   await loadVoices()
   await diagGpu()
-  if (voices.value.length > 0 && !selectedVoice.value) selectedVoice.value = voices.value
-  if (selectedVoice.value && !selectedLanguage.value) {
-    const langs = availableLanguagesForVoice.value
-    selectedLanguage.value = selectedVoice.value.fixed_language || (langs.length ? langs : 'en')
+  // Only auto-select if voices are available and none selected
+  if (voices.value.length > 0 && !selectedVoice.value) {
+    selectedVoice.value = voices.value[0]  // Select first voice
+    // Auto-select language for the first voice
+    if (!selectedLanguage.value) {
+      const langs = availableLanguagesForVoice.value
+      selectedLanguage.value = selectedVoice.value.fixed_language || (langs.length ? langs[0] : 'en')
+    }
   }
 })
 </script>

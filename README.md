@@ -12,6 +12,13 @@ A web application for text-to-speech synthesis using Coqui TTS XTTS v2 model wit
 
 ## Quick Start
 
+
+Enable WSL2, ensure the container initializes GPU:
+```bash
+docker run --rm --gpus all nvidia/cuda:12.8.0-runtime-ubuntu22.04 nvidia-smi
+```
+
+
 1. **Clone the repository**
    ```bash
    git clone <repository-url>
@@ -27,12 +34,6 @@ A web application for text-to-speech synthesis using Coqui TTS XTTS v2 model wit
 
 4. **Access the application** at `http://localhost:3000`
 
-
-
-Enable WSL2, ensure the container initializes GPU:
-```bash
-docker run --rm --gpus all nvidia/cuda:12.8.0-runtime-ubuntu22.04 nvidia-smi
-```
 
 
 ## API Endpoints

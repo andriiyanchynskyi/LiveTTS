@@ -39,7 +39,8 @@ INFERENCE_DEFAULTS = {
     "length_penalty": 1.0,
     "repetition_penalty": 5.0,
     "top_k": 50,
-    "top_p": 0.85
+    "top_p": 0.85,
+    "speed": 1.0 
 }
 # ----------------- Schemas -----------------
 class VoiceModel(BaseModel):
@@ -57,6 +58,7 @@ class SynthesisRequest(BaseModel):
     text: str = Field(..., min_length=1, max_length=5000)
     voice_name: str = Field(..., description="Voice folder name")
     language: Optional[str] = Field(default=None, description="Target language code")
+    speed: Optional[float] = Field(default=1.0, description="Synthesis speed (0.1-5.0)", ge=0.1, le=5.0)
 
 class SynthesisResponse(BaseModel):
     success: bool
@@ -319,6 +321,11 @@ async def synthesize_text(request: SynthesisRequest):
     params = {}
     for param_name in INFERENCE_DEFAULTS:
         params[param_name] = get_inference_param(param_name, voice_cfg, INFERENCE_DEFAULTS)
+
+    if request.speed is not None:
+        params["speed"] = request.speed
+
+
  
     out = model.inference(
         request.text,
@@ -330,6 +337,7 @@ async def synthesize_text(request: SynthesisRequest):
         repetition_penalty=params["repetition_penalty"],
         top_k=params["top_k"],
         top_p=params["top_p"],
+        speed=params["speed"],
         enable_text_splitting=True
     )
 
