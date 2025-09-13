@@ -21,6 +21,10 @@ WORKDIR /app
 COPY requirements.txt .
 RUN python -m pip install --upgrade pip && pip install -r requirements.txt
 
+RUN python -m spacy download en_core_web_sm
+RUN python -m spacy download en_core_web_md
+RUN python -m spacy download xx_ent_wiki_sm 
+
 COPY app ./app
 
 
