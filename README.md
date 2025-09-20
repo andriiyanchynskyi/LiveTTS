@@ -4,7 +4,7 @@ A web application for text-to-speech synthesis using Coqui TTS XTTS v2 model wit
 
 ## Features
 
-**Multilingual Support**: Supports 17 languages
+**Multilingual Support**: Supports 16 languages
 **Custom Voice Models**: Load your XTTS models into /Voices folder
 **Real-time Synthesis**: Generate high-quality speech from text input
 **GPU Acceleration**: Optional CUDA support for faster processing
