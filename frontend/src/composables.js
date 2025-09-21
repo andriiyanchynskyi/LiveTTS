@@ -26,6 +26,9 @@ const showTooltip = ref(false)
 const zeroShotActive = ref(false)
 const zeroShotName = ref('')
 
+// Enhancement states (global)
+const enhancementStates = ref({})
+
 // API calls
 async function loadLanguages() {
   try {
@@ -197,7 +200,8 @@ async function synthesize() {
       const payload = {
         text: text.value,
         language: selectedLanguage.value,
-        speed: speed.value
+        speed: speed.value,
+        enhancements: { ...enhancementStates.value }  // shallow clone
       }
       const { data } = await axios.post(`${apiBase}/synthesize/zero-shot`, payload)
       audioUrl.value = data.audio_url
@@ -209,7 +213,8 @@ async function synthesize() {
         text: text.value,
         voice_name: selectedVoice.value.name,
         language: selectedLanguage.value,
-        speed: speed.value
+        speed: speed.value,
+        enhancements: { ...enhancementStates.value }  // shallow clone
       }
       const { data } = await axios.post(`${apiBase}/synthesize`, payload)
       audioUrl.value = data.audio_url
@@ -230,7 +235,7 @@ async function initializeApp() {
   await loadLanguages()
   await loadVoices()
   try {
-    const { data } = await axios.get(`${apiBase}/gpu`)
+    const { data } = await axios.get(`${apiBase}/gpu`) 
     Object.assign(gpuInfo.value, data)
   } catch {
   }
@@ -241,6 +246,36 @@ async function initializeApp() {
       selectedLanguage.value = selectedVoice.value.fixed_language || (langs.length ? langs[0] : 'en')
     }
   }
+}
+
+// Composable to fetch and manage audio enhancements
+ function useEnhancements(apiBase) {
+  const enhancements = ref({})  // {key: description}
+  const activeTooltip = ref(null)  // key of current hovered toggle
+
+  // Fetch enhancements on mount
+  onMounted(async () => {
+    try {
+      const { data } = await axios.get(`${apiBase}/enhancements`)
+      enhancements.value = data
+      // Initialize states to false
+      Object.keys(data).forEach(key => {
+        enhancementStates.value[key] = false
+      })
+    } catch (e) {
+      console.error('Failed to load enhancements:', e)
+    }
+  })
+
+  // Tooltip handlers
+  function setTooltip(key, desc) {
+    activeTooltip.value = key
+  }
+  function clearTooltip() {
+    activeTooltip.value = null
+  }
+
+  return { enhancements, enhancementStates, activeTooltip, setTooltip, clearTooltip }
 }
 
 // Export all reactive state and functions
@@ -270,6 +305,9 @@ export {
   zeroShotActive,
   zeroShotName,
   
+  // Enhancement states
+  enhancementStates,
+  
   // Computed
   availableLanguagesForVoice,
   isReadyForSynthesis,
@@ -284,5 +322,8 @@ export {
   handleFileSelected,
   clearZeroShot,
   synthesize,
-  initializeApp
+  initializeApp,
+  
+  // Composables
+  useEnhancements
 }

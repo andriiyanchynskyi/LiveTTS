@@ -34,14 +34,6 @@
           </select>
         </div>
 
-        <div class="col">
-          <label class="label">Playback Speed: {{ speed.toFixed(1) }}x</label>
-          <div class="range-row">
-            <span class="muted small">0.5x</span>
-            <input type="range" v-model.number="speed" min="0.5" max="2.0" step="0.1" class="range" />
-            <span class="muted small">2.0x</span>
-          </div>
-        </div>
 
         <button :disabled="loading || !isReadyForSynthesis" @click="synthesize" class="btn synthesize-btn">
           {{ loading ? "Generating..." : "Synthesize" }}
@@ -53,9 +45,34 @@
       </div>
     </section>
 
-    <!-- Zero-shot uploader -->
+    
     <section class="card">
-      <div class="row justify-end">
+    <div class="row wrap justify-end">
+         <!-- Playback Speed -->
+        <div class="col">
+          <label class="label">Playback Speed: {{ speed.toFixed(1) }}x</label>
+          <div class="range-row">
+            <span class="muted small">0.5x</span>
+            <input type="range" v-model.number="speed" min="0.5" max="2.0" step="0.1" class="range" />
+            <span class="muted small">2.0x</span>
+          </div>
+        </div>
+         <!-- Audio Enhancements -->
+        <div v-for="(desc, key) in enhancements" :key="key" class="toggle-wrapper"
+             @mouseenter="setTooltip(key, desc)" @mouseleave="clearTooltip">
+          <label class="toggle-label">
+            <input 
+              type="checkbox" 
+              :checked="enhancementStates[key] ?? false"
+              @change="enhancementStates[key] = $event.target.checked"
+              class="toggle-input" 
+            />
+            {{ key.charAt(0).toUpperCase() + key.slice(1) }}
+          </label>
+          <div v-if="activeTooltip === key" class="tooltip">{{ desc }}</div>
+        </div>
+        <!-- Zero-shot uploader -->
+      <div class="row">
         <div class="upload-icon-wrapper"
              @click="triggerFileDialog"
              @mouseenter="showTooltip = true"
@@ -67,8 +84,7 @@
           </div>
         </div>
       </div>
-
-      
+    </div>
     </section>
 
     <div v-if="zeroShotActive" class="inline-info">
@@ -186,6 +202,9 @@ import {
   zeroShotActive,
   zeroShotName,
   
+  // Enhancement states
+  enhancementStates,
+  
   // Computed
   availableLanguagesForVoice,
   isReadyForSynthesis,
@@ -197,8 +216,14 @@ import {
   handleFileSelected,
   clearZeroShot,
   synthesize,
-  initializeApp
+  initializeApp,
+  
+  // Composables
+  useEnhancements
 } from './composables.js'
+
+// Enhancements (fetched and managed via composable)
+const { enhancements, activeTooltip, setTooltip, clearTooltip } = useEnhancements(apiBase)
 
 // Initialize the app when component mounts
 onMounted(initializeApp)

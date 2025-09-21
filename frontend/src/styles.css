@@ -48,20 +48,21 @@
 }
 
 .textarea {
-  width: 97%;
+  width: 100%;
   padding: 12px;
   font-size: 16px;
   border: 1px solid #ccc;
   border-radius: 8px;
   resize: vertical;
   min-height: 110px;
+  box-sizing: border-box;
 }
 
 .select {
   padding: 12px;
   border: 1px solid #ccc;
   border-radius: 4px;
-  width: 55%;
+  width: 40%;
   font-size: 16px;
 }
 
@@ -137,11 +138,13 @@
 }
 
 .download-btn {
-  padding: 8px 16px;
+  padding: 10px 16px;
   background-color: rgb(240, 180, 70);
   color: white;
   text-decoration: none;
   border-radius: 4px;
+  font-size: 16px;
+  font-weight: 500;
 }
 
 /* Grid & rows */
@@ -162,6 +165,7 @@
   gap: 8px;
 }
 
+
 .align-end {
   align-items: end;
 }
@@ -180,7 +184,7 @@
 
 .col {
   flex: 1;
-  min-width: 200px;
+  min-width: 150px;
 }
 
 /* Voices grid */
@@ -243,7 +247,7 @@
   justify-content: center;
   width: 42px;
   height: 42px;
-  border-radius: 10px;
+  border-radius: 25px;
   background: #fff7ea;
   border: 1px solid #f0e0c2;
   cursor: pointer;
@@ -342,11 +346,84 @@
   margin-top: 12px;
 }
 
+/* Toggle switches with tooltip */
+.toggle-wrapper {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+}
+
+.toggle-label {
+  font-size: 14px;
+  font-weight: 500;
+}
+
+.toggle-input {
+  appearance: none;
+  width: 40px;
+  height: 20px;
+  background: #ccc;
+  border-radius: 20px;
+  position: relative;
+  transition: background 0.2s ease;
+}
+
+.toggle-input:checked {
+  background: rgb(246, 192, 80);
+}
+
+.toggle-input::before {
+  content: '';
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 16px;
+  height: 16px;
+  background: white;
+  border-radius: 50%;
+  transition: transform 0.2s ease;
+}
+
+.toggle-input:checked::before {
+  transform: translateX(20px);
+}
+
+.toggle-wrapper:hover .toggle-input {
+  box-shadow: 0 0 5px rgba(246, 192, 80, 0.5);
+}
+
+/* Tooltips (CSS only, hover-based) */
+.toggle-wrapper .tooltip {
+  display: none;
+  position: absolute;
+  top: 100%;
+  left: 0;
+  z-index: 10;
+  width: 200px;
+  padding: 8px;
+  background: #333;
+  color: #fff;
+  font-size: 12px;
+  border-radius: 4px;
+  box-shadow: 0 2px 4px rgba(0,0,0,0.2);
+  margin-top: 4px;
+}
+
+.toggle-wrapper:hover .tooltip {
+  display: block;
+}
+
 /* Responsive */
 @media (max-width: 768px) {
   .container {
     margin: 12px;
     max-width: none;
+  }
+  .textarea {
+    width: 100%;
+    font-size: 16px; /* Prevent zoom on iOS */
   }
   .select, .range {
     width: 100%;

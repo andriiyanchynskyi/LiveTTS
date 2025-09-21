@@ -10,6 +10,9 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
+from .enhancements import ENHANCEMENTS, apply_enhancements
+
+
 import torch
 import soundfile as sf
 
@@ -46,7 +49,7 @@ _SPACY_MODELS: Dict[str, str] = {}
 try:
     import spacy
     _SPACY_AVAILABLE = True
-    # Priority list: best specific model -> multilingual fallback
+    # Priority list: best specific model, then multilingual fallback
     language_models = {
         "en": ["en_core_web_md", "en_core_web_sm"],
         "es": ["es_core_news_sm", "xx_ent_wiki_sm"],
@@ -126,11 +129,16 @@ class SynthesisRequest(BaseModel):
     voice_name: str
     language: Optional[str] = None
     speed: Optional[float] = Field(default=1.0, ge=0.1, le=5.0)
+    enhancements: Optional[Dict[str, bool]] = Field(
+        default_factory=dict,
+        description="Optional audio-quality enhancement flags"
+    )
 
 class ZeroShotSynthesisRequest(BaseModel):
     text: str = Field(..., min_length=1, max_length=5000)
     language: str
     speed: Optional[float] = Field(default=1.0, ge=0.1, le=5.0)
+    enhancements: Optional[Dict[str, bool]] = Field(default_factory=dict)
 
 class SynthesisResponse(BaseModel):
     success: bool
@@ -290,6 +298,8 @@ def _list_voices() -> List[VoiceModel]:
         voices = [zs] + voices
     return voices
 
+
+
 # ----------------- App init -----------------
 app = FastAPI(
     title="Coqui TTS XTTS v2 API",
@@ -343,6 +353,13 @@ async def spacy_info():
         "loaded_models": _SPACY_MODELS,
         "total_models": len(_SPACY_MODELS)
     }
+
+@app.get("/enhancements")
+async def list_enhancements():
+    """
+    Return the dict the front-end uses to build toggle buttons.
+    """
+    return ENHANCEMENTS
 
 @app.get("/voices", response_model=VoiceListResponse)
 async def get_voices():
@@ -525,6 +542,10 @@ async def synthesize_text(request: SynthesisRequest):
     sample_rate = int(voice_cfg.get("audio", {}).get("output_sample_rate", 24000))
     out_name = f"{uuid.uuid4().hex}.wav"
     out_path = OUTPUT_DIR / out_name
+
+    # --- optional tweaks ---------------------------------
+    wav = apply_enhancements( wav, sample_rate, request.enhancements)
+   
     sf.write(str(out_path), wav, sample_rate)
 
     return SynthesisResponse(
@@ -592,6 +613,11 @@ async def synthesize_zero_shot(request: ZeroShotSynthesisRequest):
     sample_rate = 24000
     out_name = f"{uuid.uuid4().hex}.wav"
     out_path = OUTPUT_DIR / out_name
+    
+    # --- optional tweaks ---------------------------------
+    wav = apply_enhancements( wav, sample_rate, request.enhancements)
+   
+    
     sf.write(str(out_path), wav, sample_rate)
 
     return SynthesisResponse(

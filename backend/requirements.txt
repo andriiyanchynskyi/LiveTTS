@@ -8,3 +8,5 @@ torch>=2.3.0
 torchaudio>=2.3.0
 deepspeed==0.17.5
 spacy>=3.7.0
+pydub>=0.25
+scipy>=1.10
