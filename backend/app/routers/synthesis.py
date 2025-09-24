@@ -7,6 +7,9 @@ from typing import Dict, Optional
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 import soundfile as sf
+import torch
+import torchaudio
+import numpy as np
 
 from ..enhancements import apply_enhancements
 from ..utils import (
@@ -33,7 +36,7 @@ def create_router(
     INFERENCE_TIMEOUT_SEC = float(os.getenv("INFERENCE_TIMEOUT_SEC", "60"))
 
     INFERENCE_DEFAULTS = {
-        "temperature": 0.75,
+        "temperature": 0.7,
         "length_penalty": 1.0,
         "repetition_penalty": 5.0,
         "top_k": 50,
@@ -41,10 +44,9 @@ def create_router(
         "speed": 1.0,
     }
 
-    def build_params(voice_cfg: dict, req_speed: float | None) -> dict:
+    def build_params(voice_cfg: dict) -> dict:
         params = {k: get_inference_param(k, voice_cfg, INFERENCE_DEFAULTS) for k in INFERENCE_DEFAULTS}
-        if req_speed is not None:
-            params["speed"] = req_speed
+        
         return params
 
     def resolve_text_splitting(text: str, language: str) -> bool:
@@ -64,7 +66,8 @@ def create_router(
             repetition_penalty=params["repetition_penalty"],
             top_k=params["top_k"],
             top_p=params["top_p"],
-            speed=params["speed"],
+            #speed=params["speed"],
+            speed=1.0,
             enable_text_splitting=enable_split,
         )
 
@@ -83,23 +86,118 @@ def create_router(
             timeout=INFERENCE_TIMEOUT_SEC,
         )
 
-    def write_wav(wav, sr: int) -> tuple[str, Path]:
+    def _ensure_numpy(wav_input) -> np.ndarray:
+        """Convert any input to numpy array."""
+        if isinstance(wav_input, torch.Tensor):
+            return wav_input.squeeze(0).detach().cpu().numpy()
+        else:
+            return wav_input
+
+
+    def _apply_tempo_effect(wav_input, sr: int, speed: float):
+        """Pitch-preserving tempo change. Only apply SoX on CPU when speed != 1.0.
+        Keep the original device otherwise. 
+        """
+        
+        #Prepare tensor [channels, num_frames]
+        wav_t = torch.from_numpy(wav_input)
+        
+        if wav_t.dim() == 1:
+            wav_t = wav_t.unsqueeze(0)
+        elif wav_t.dim() > 2:
+            # Collapse to mono if unexpected shape
+            wav_t = wav_t.view(1, -1)
+
+        wav_t = wav_t.to(dtype=torch.float32)
+        # ----- tempo change (SoX) only when needed -----
+        try:
+            logger.info(f"Applying SoX tempo={speed:.3f} on CPU")
+
+            cpu_wav, _ = torchaudio.sox_effects.apply_effects_tensor(
+                    wav_t,
+                    sr,
+                    [["tempo", f"{speed:.3f}"]],
+            )
+            cpu_wav = torch.clamp(cpu_wav, -1.0, 1.0)
+        
+            return cpu_wav.squeeze(0).numpy()
+        except Exception as e:
+            logger.warning(f"Tempo effect failed, returning original: {e}")
+            return wav_input
+
+    def process_audio_speed_and_enhancements(
+        wav, sample_rate: int, speed: Optional[float], enhancements: Dict[str, bool]
+    ) -> np.ndarray:
+        """Handle speed change and enhancements for any synthesis type."""
+        needs_speed = abs(float(speed or 1.0) - 1.0) > 1e-3
+        needs_enhancements = enhancements and any(enhancements.values())
+       
+        # Convert to tensor
+        wav_final = _ensure_numpy(wav)
+
+        if not needs_speed and not needs_enhancements:
+            return wav_final
+        
+        if needs_speed:
+            wav_final = _apply_tempo_effect(wav_final, sample_rate, float(speed))
+        
+        if needs_enhancements:
+            wav_final = apply_enhancements(wav_final, sample_rate, enhancements)
+        
+        
+        return wav_final
+
+    def save_synthesis_result(wav_process, sample_rate: int) -> tuple[str, str]:
+        """Save synthesis result and return URL + filename."""
         out_name = f"{uuid.uuid4().hex}.wav"
         out_path = output_dir / out_name
-        sf.write(str(out_path), wav, sr)
-        return out_name, out_path
+        sf.write(str(out_path), wav_process, sample_rate)
+        return f"/files/{out_name}", out_name
+
+    async def run_synthesis_pipeline(
+        model, text: str, language: str, gpt_cond_latent, speaker_embedding, 
+        voice_cfg: dict, speed: Optional[float], enhancements: Dict[str, bool]
+    ) -> tuple[str, str]:  # (audio_url, filename)
+        """Shared synthesis pipeline for regular and zero-shot voices."""
+        
+        # Inference parameters
+        params = build_params(voice_cfg)
+        
+        # Text splitting
+        enable_splitting = resolve_text_splitting(text, language)
+        
+        # Inference
+        try:
+            out = await run_inference_with_timeout(
+                model, text, language, gpt_cond_latent, speaker_embedding, params, enable_splitting
+            )
+        except asyncio.TimeoutError:
+            raise HTTPException(status_code=504, detail="XTTS inference timed out")
+        
+        wav = out.get("wav")
+        if wav is None:
+            raise HTTPException(status_code=500, detail="XTTS inference returned no 'wav'")
+        
+        # Determine sample rate
+        sample_rate = int(voice_cfg.get("audio", {}).get("output_sample_rate", 24000))
+        
+        # Handle speed and enhancements
+        wav_process = process_audio_speed_and_enhancements(wav, sample_rate, speed, enhancements)
+        
+        # Save
+        return save_synthesis_result(wav_process, sample_rate)
 
     class SynthesisRequest(BaseModel):
-        text: str = Field(..., min_length=1, max_length=5000)
+        text: str = Field(..., min_length=1, max_length=10000)
         voice_name: str
         language: Optional[str] = None
-        speed: Optional[float] = Field(default=1.0, ge=0.1, le=2.0)
+        speed: Optional[float] = Field(default=1.0, ge=0.5, le=2.0)
         enhancements: Optional[Dict[str, bool]] = Field(default_factory=dict)
 
     class ZeroShotSynthesisRequest(BaseModel):
-        text: str = Field(..., min_length=1, max_length=5000)
+        text: str = Field(..., min_length=1, max_length=10000)
         language: str
-        speed: Optional[float] = Field(default=1.0, ge=0.1, le=2.0)
+        speed: Optional[float] = Field(default=1.0, ge=0.5, le=2.0)
         enhancements: Optional[Dict[str, bool]] = Field(default_factory=dict)
 
     class SynthesisResponse(BaseModel):
@@ -136,36 +234,15 @@ def create_router(
         model = load_xtts_func(voice.config_path, voice.m_path, voice.vocab_path)
         # Conditioning latents from voice references
         gpt_cond_latent, speaker_embedding = model.get_conditioning_latents(audio_path=[str(ref)])
-        # Resolve inference parameters (prioritize voice config with fallback to defaults)
-        params = build_params(voice_cfg, request.speed)
-        # Text splitting (spaCy)
-        enable_splitting = resolve_text_splitting(request.text, effective_lang)
-        try:
-            out = await run_inference_with_timeout(
-                model,
-                request.text,
-                effective_lang,
-                gpt_cond_latent,
-                speaker_embedding,
-                params,
-                enable_splitting,
-            )
-        except asyncio.TimeoutError:
-            raise HTTPException(status_code=504, detail="XTTS inference timed out")
 
-        wav = out.get("wav")
-        if wav is None:
-            raise HTTPException(status_code=500, detail="XTTS inference returned no 'wav'")
-
-        sample_rate = int(voice_cfg.get("audio", {}).get("output_sample_rate", 24000))
-        #  optional tweaks 
-        out_name, out_path = write_wav(apply_enhancements(wav, sample_rate, request.enhancements), sample_rate)
+        # SHARED PIPELINE
+        audio_url, filename = await run_synthesis_pipeline(
+            model, request.text, effective_lang, gpt_cond_latent, speaker_embedding,
+            voice_cfg, request.speed, request.enhancements
+        )
 
         return SynthesisResponse(
-            success=True,
-            audio_url=f"/files/{out_name}",
-            filename=out_name,
-            voice_used=voice.name,
+            success=True, audio_url=audio_url, filename=filename, voice_used=voice.name,
         )
 
     @router.post("/synthesize/zero-shot", response_model=SynthesisResponse)
@@ -185,43 +262,24 @@ def create_router(
         model = load_xtts_func(str(base_cfg), str(base_m), str(base_v))
         gpt_cond_latent, speaker_embedding = model.get_conditioning_latents(audio_path=[str(custom_ref_path)])
 
-        params = build_params({}, request.speed)
-
         effective_lang = (request.language or "en").strip().lower()
         if effective_lang not in [l.lower() for l in supported_languages]:
             effective_lang = "en"
 
-        enable_splitting = resolve_text_splitting(request.text, effective_lang)
-        try:
-            out = await run_inference_with_timeout(
-                model,
-                request.text,
-                effective_lang,
-                gpt_cond_latent,
-                speaker_embedding,
-                params,
-                enable_splitting,
-            )
-        except asyncio.TimeoutError:
-            raise HTTPException(status_code=504, detail="XTTS inference timed out")
-
-        wav = out.get("wav")
-        if wav is None:
-            raise HTTPException(status_code=500, detail="XTTS inference returned no 'wav'")
-
         # Prefer sample rate from base model config, fallback to 24000
         try:
             base_cfg_json = load_voice_config(str(base_cfg))
-            sample_rate = int(base_cfg_json.get("audio", {}).get("output_sample_rate", 24000))
         except Exception:
-            sample_rate = 24000
-        out_name, out_path = write_wav(apply_enhancements(wav, sample_rate, request.enhancements), sample_rate)
+            base_cfg_json = {"audio": {"output_sample_rate": 24000}}
+
+        # SHARED PIPELINE
+        audio_url, filename = await run_synthesis_pipeline(
+            model, request.text, effective_lang, gpt_cond_latent, speaker_embedding,
+            base_cfg_json, request.speed, request.enhancements
+        )
 
         return SynthesisResponse(
-            success=True,
-            audio_url=f"/files/{out_name}",
-            filename=out_name,
-            voice_used="Custom",
+            success=True, audio_url=audio_url, filename=filename, voice_used="Custom",
         )
 
     return router

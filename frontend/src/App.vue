@@ -53,7 +53,7 @@
           <label class="label">Playback Speed: {{ speed.toFixed(1) }}x</label>
           <div class="range-row">
             <span class="muted small">0.5x</span>
-            <input type="range" v-model.number="speed" min="0.5" max="2.0" step="0.1" class="range" />
+            <input type="range" v-model.number="sliderValue" min="0" max="100" step="1" class="range" />
             <span class="muted small">2.0x</span>
           </div>
         </div>
@@ -194,6 +194,7 @@ import {
   systemStatus,
   gpuInfo,
   availableLanguages,
+  sliderValue,
   speed,
   
   // Zero-shot helpers

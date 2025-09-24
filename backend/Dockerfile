@@ -3,16 +3,18 @@ FROM pytorch/pytorch:2.8.0-cuda12.8-cudnn9-runtime
 
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    ffmpeg git  \
+    ffmpeg git \
     espeak-ng \
     espeak-ng-data \
     libespeak-ng1 \
+    sox libsox-dev libsox-fmt-all \
+    libsndfile1 \
     && rm -rf /var/lib/apt/lists/*
 
 
 ENV PIP_NO_CACHE_DIR=1 \
     PYTHONDONTWRITEBYTECODE=1 \
-    PYTHONUNBUFFERED=1
+    PYTHONUNBUFFERED=1 
 
 
 WORKDIR /app

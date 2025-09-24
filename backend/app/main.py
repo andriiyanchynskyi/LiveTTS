@@ -17,7 +17,6 @@ from .repositories.voice_repo import list_voices
 
 
 import torch
-import soundfile as sf
 
 # ----------------- Logging -----------------
 logging.basicConfig(level=logging.INFO)
@@ -36,6 +35,7 @@ CUSTOM_DIR.mkdir(parents=True, exist_ok=True)
 CUSTOM_REF_PATH = CUSTOM_DIR / "reference.wav"
 CUSTOM_STATE_PATH = CUSTOM_DIR / "state.json"  # persists zero-shot voice metadata
 
+
 # ----------------- XTTS imports -----------------
 try:
     from TTS.tts.configs.xtts_config import XttsConfig
@@ -51,15 +51,6 @@ SUPPORTED_LANGUAGES = [
     "en","es","fr","de","it","pt","pl","tr","ru","nl","cs","ar","zh-cn","hu","ko","ja"
 ]
 
-# Inference defaults used as fallback (and as base for zero-shot)
-INFERENCE_DEFAULTS = {
-    "temperature": 0.75,
-    "length_penalty": 1.0,
-    "repetition_penalty": 5.0,
-    "top_k": 50,
-    "top_p": 0.85,
-    "speed": 1.0
-}
 
 # Base checkpoint for zero-shot mode 
 ZERO_SHOT_BASE = {
@@ -72,6 +63,9 @@ ZERO_SHOT_BASE = {
 
 # ----------------- Utils -----------------
 
+def _env_truthy(name: str) -> bool:
+    return os.getenv(name, "").strip().lower() in {"1","true","yes","on"}
+
 def _load_xtts(config_path: str, m_path: str, vocab_path: str) -> Xtts:
     if not _XTTS_AVAILABLE:
         from fastapi import HTTPException
@@ -79,28 +73,29 @@ def _load_xtts(config_path: str, m_path: str, vocab_path: str) -> Xtts:
     try:
         cfg = XttsConfig()
         cfg.load_json(config_path)
+     
         model = Xtts.init_from_config(cfg)
-       
-        def _env_truthy(name: str, default: str = "0") -> bool:
-            val = os.getenv(name, default).strip().lower()
-            return val in {"1", "true", "yes", "on"}
 
-        want_deepspeed = _env_truthy("USE_DEEPSPEED", "0")
-        cuda_ok = bool(torch.cuda.is_available()) and bool(os.getenv("CUDA_HOME"))
-        use_deepspeed = bool(want_deepspeed and cuda_ok)
+        want_ds = _env_truthy("USE_DEEPSPEED")
+        cuda_ok = torch.cuda.is_available()
 
-        if want_deepspeed and not use_deepspeed:
-            logger.warning("USE_DEEPSPEED requested but CUDA is not fully configured.")
+        if want_ds and "CUDA_HOME" not in os.environ:
+            logger.warning("No CUDA_HOME; force DS_BUILD_OPS=0 in the docker's environment")
 
-        model.load_checkpoint(
-            cfg,
-            checkpoint_path=m_path,
-            vocab_path=vocab_path,
-            use_deepspeed=use_deepspeed,
-        )
+        try:
+            model.load_checkpoint(cfg, checkpoint_path=m_path, vocab_path=vocab_path,
+                                  use_deepspeed= want_ds and cuda_ok)
+        except Exception as e:
+            if any(keyword in str(e).lower() for keyword in ["cuda_home", "deepspeed", "nvcc", "build", "CUDA_HOME"]):
+                logger.error("DeepSpeed ops build failed, reloading without DS")
+                model.load_checkpoint(cfg, checkpoint_path=m_path, vocab_path=vocab_path,
+                                      use_deepspeed=False)
+            else:
+                raise
+
         if torch.cuda.is_available():
             model.cuda()
-        return model
+        return model 
     except Exception as e:
         logger.error(f"XTTS load failed: {e}")
         from fastapi import HTTPException

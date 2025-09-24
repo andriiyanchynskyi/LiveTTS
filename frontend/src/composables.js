@@ -18,7 +18,20 @@ const errorMessage = ref('')
 const systemStatus = ref('Loading...')
 const gpuInfo = ref({})
 const availableLanguages = ref([])
-const speed = ref(1.0)
+// Centered slider value (0–100), 50 corresponds to 1.0x
+const sliderValue = ref(50)
+// Map sliderValue -> speed: 0.5x–1.0x on left half, 1.0x–2.0x on right
+const speed = computed(() => {
+  const pos = sliderValue.value / 100
+  let raw
+  if (pos <= 0.5) {
+    raw = 0.5 + pos 
+  } else {
+    raw = 1.0 + (pos - 0.5) * 2 // 
+  }
+  // Round to one decimal (
+  return Math.round(raw * 10) / 10
+})
 
 // Zero-shot helpers
 const fileInput = ref(null)
@@ -297,6 +310,7 @@ export {
   systemStatus,
   gpuInfo,
   availableLanguages,
+  sliderValue,
   speed,
   
   // Zero-shot helpers

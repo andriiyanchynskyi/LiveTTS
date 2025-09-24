@@ -7,7 +7,7 @@ logger = logging.getLogger(__name__)
 
 _SPACY_AVAILABLE = False
 _SPACY_MODELS: Dict[str, str] = {}
-_SPACY_LOAD_RETRIES = max(0, int(os.getenv("SPACY_LOAD_RETRIES", "1")))
+_SPACY_LOAD_RETRIES = max(0, int(os.getenv("SPACY_LOAD_RETRIES", "0")))
 _SPACY_LOAD_RETRY_DELAY_SEC = max(0.0, float(os.getenv("SPACY_LOAD_RETRY_DELAY_SEC", "0.25")))
 
 try:
@@ -38,7 +38,7 @@ try:
                 spacy.load(model_name)
                 return True
             except OSError as e:
-                if attempt < attempts - 1:
+                if attempt < attempts:
                     logger.warning(f"spaCy load failed for '{model_name}' (attempt {attempt+1}/{attempts}): {e}")
                     if _SPACY_LOAD_RETRY_DELAY_SEC:
                         sleep(_SPACY_LOAD_RETRY_DELAY_SEC)
@@ -65,11 +65,11 @@ def should_enable_text_splitting(text_length: int, language: str) -> bool:
         return False
     if language not in _SPACY_MODELS:
         return False
-    return text_length > 1000
+    return text_length > 800
 
 
 def validate_text_splitting_configuration(text_length: int, language: str, enable_splitting: bool) -> None:
-    if text_length > 1000 and not enable_splitting:
+    if text_length > 800 and not enable_splitting:
         if not _SPACY_AVAILABLE:
             logger.warning(f"Text is {text_length} chars but spaCy not available.")
         elif language not in _SPACY_MODELS:
