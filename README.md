@@ -15,14 +15,16 @@ Production-ready FastAPI service and simple web UI for text-to-speech powered by
 - **Operational introspection**: `/health`, `/gpu`, `/enhancements`, `/spacy`, plus `/healthz` for k8s‑style probes.
 
 
+<img width="1314" height="1254" alt="image" src="https://github.com/user-attachments/assets/554b48a9-c658-4518-a560-04e96d831ed2" />
+
 
 ## Quick Start
 
 
 1. **Verify Docker can access your GPU (optional):** On Windows, ensure WSL2 is enabled.
-```bash
-docker run --rm --gpus all nvidia/cuda:12.8.0-runtime-ubuntu22.04 nvidia-smi
-```
+   ```bash
+   docker run --rm --gpus all nvidia/cuda:12.8.0-runtime-ubuntu22.04 nvidia-smi
+   ```
 
 
 2. **Clone the repository**
@@ -91,4 +93,4 @@ Notes:
 - `language` is validated against the voice config; falls back to a supported default.
 - Default output sample rate is taken from the voice config (fallback 24 kHz).
 - Inference timeout can be controlled via `INFERENCE_TIMEOUT_SEC` (default 60s).
-
+- You can find fine-tuned voices at [https://huggingface.co/coqui/XTTS-v2](https://huggingface.co/coqui/XTTS-v2).
