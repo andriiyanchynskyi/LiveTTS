@@ -66,8 +66,8 @@ def create_router(
             repetition_penalty=params["repetition_penalty"],
             top_k=params["top_k"],
             top_p=params["top_p"],
-            #speed=params["speed"],
-            speed=1.0,
+            speed=params["speed"],
+            #speed=1.0,
             enable_text_splitting=enable_split,
         )
 
@@ -98,6 +98,10 @@ def create_router(
         """Pitch-preserving tempo change. Only apply SoX on CPU when speed != 1.0.
         Keep the original device otherwise. 
         """
+        # Validate speed parameter
+        if not (0.5 <= speed <= 2.0):
+            logger.warning(f"Invalid speed {speed}, clamping to valid range [0.5, 2.0]")
+            speed = max(0.5, min(2.0, speed))
         
         #Prepare tensor [channels, num_frames]
         wav_t = torch.from_numpy(wav_input)
@@ -122,30 +126,36 @@ def create_router(
         
             return cpu_wav.squeeze(0).numpy()
         except Exception as e:
-            logger.warning(f"Tempo effect failed, returning original: {e}")
+            logger.error(f"SOX tempo effect failed: {e}")
+            logger.warning("Returning original audio without speed modification")
             return wav_input
 
     def process_audio_speed_and_enhancements(
         wav, sample_rate: int, speed: Optional[float], enhancements: Dict[str, bool]
     ) -> np.ndarray:
+
         """Handle speed change and enhancements for any synthesis type."""
-        needs_speed = abs(float(speed or 1.0) - 1.0) > 1e-3
-        needs_enhancements = enhancements and any(enhancements.values())
-       
+        use_sox_speed = enhancements.get("use_sox_speed", False) if enhancements else False
+        target_speed = float(speed or 1.0)
+        needs_sox_speed = use_sox_speed and abs(target_speed - 1.0) > 1e-3
+    
+        other_enhancements = {k: v for k, v in (enhancements or {}).items() if k != "use_sox_speed"}
+        needs_enhancements = other_enhancements and any(other_enhancements.values())
         # Convert to tensor
         wav_final = _ensure_numpy(wav)
 
-        if not needs_speed and not needs_enhancements:
+        if not needs_sox_speed and not needs_enhancements:
             return wav_final
-        
-        if needs_speed:
-            wav_final = _apply_tempo_effect(wav_final, sample_rate, float(speed))
-        
+
+        if needs_sox_speed:
+            logger.info(f"SOX speed mode enabled, applying tempo effect: {target_speed}")
+            wav_final = _apply_tempo_effect(wav_final, sample_rate, target_speed)
+
         if needs_enhancements:
-            wav_final = apply_enhancements(wav_final, sample_rate, enhancements)
-        
-        
+            wav_final = apply_enhancements(wav_final, sample_rate, other_enhancements)
+
         return wav_final
+        
 
     def save_synthesis_result(wav_process, sample_rate: int) -> tuple[str, str]:
         """Save synthesis result and return URL + filename."""
@@ -160,9 +170,25 @@ def create_router(
     ) -> tuple[str, str]:  # (audio_url, filename)
         """Shared synthesis pipeline for regular and zero-shot voices."""
         
+        # Validate and normalize inputs
+        target_speed = float(speed or 1.0)
+        if not (0.5 <= target_speed <= 2.0):
+            raise HTTPException(status_code=400, detail=f"Speed must be between 0.5 and 2.0, got {target_speed}")
+        
         # Inference parameters
         params = build_params(voice_cfg)
         
+        use_sox_speed = enhancements.get("use_sox_speed", False)
+    
+        if use_sox_speed:
+            # If use SOX, XTTS should generate at speed 1.0
+            params["speed"] = 1.0
+            logger.info(f"SOX mode: XTTS speed=1.0, SOX will apply speed={target_speed}")
+        else:
+            # Use native XTTS speed (default)
+            params["speed"] = target_speed
+            logger.info(f"Native XTTS speed mode: speed={params['speed']}")
+
         # Text splitting
         enable_splitting = resolve_text_splitting(text, language)
         
@@ -182,7 +208,7 @@ def create_router(
         sample_rate = int(voice_cfg.get("audio", {}).get("output_sample_rate", 24000))
         
         # Handle speed and enhancements
-        wav_process = process_audio_speed_and_enhancements(wav, sample_rate, speed, enhancements)
+        wav_process = process_audio_speed_and_enhancements(wav, sample_rate, target_speed, enhancements)
         
         # Save
         return save_synthesis_result(wav_process, sample_rate)

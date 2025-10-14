@@ -25,11 +25,13 @@ const speed = computed(() => {
   const pos = sliderValue.value / 100
   let raw
   if (pos <= 0.5) {
-    raw = 0.5 + pos 
+    // Left half: 0.5x to 1.0x (linear mapping from 0 to 0.5)
+    raw = 0.5 + pos * 1.0  // pos * 1.0 maps [0, 0.5] to [0, 0.5], then add 0.5
   } else {
-    raw = 1.0 + (pos - 0.5) * 2 // 
+    // Right half: 1.0x to 2.0x (linear mapping from 0.5 to 1.0)
+    raw = 1.0 + (pos - 0.5) * 2.0  // (pos - 0.5) maps [0.5, 1.0] to [0, 0.5], then * 2.0
   }
-  // Round to one decimal (
+  // Round to one decimal place
   return Math.round(raw * 10) / 10
 })
 

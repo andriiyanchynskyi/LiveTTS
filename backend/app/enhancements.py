@@ -29,6 +29,7 @@ NORM_TARGET_DBFS = -1.0     # normalization target peak
 # Each key is a short flag the UI will send
 #
 ENHANCEMENTS: Dict[str, str] = {
+    "sox": "Use SOX for speed control (pitch-preserving alternative to native XTTS, best for >1.5x or <0.7x)",
     "denoise":   "Noise reduction (spectral gating)",
     "normalize": "Loudness normalization (–1 dBFSS)",
     "equalize":  "Gentle EQ for fuller low-mids & crisp highs",
