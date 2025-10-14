@@ -33,7 +33,7 @@ def create_router(
 ):
     router = APIRouter()
 
-    INFERENCE_TIMEOUT_SEC = float(os.getenv("INFERENCE_TIMEOUT_SEC", "60"))
+    INFERENCE_TIMEOUT_SEC = float(os.getenv("INFERENCE_TIMEOUT_SEC", "360"))
 
     INFERENCE_DEFAULTS = {
         "temperature": 0.7,

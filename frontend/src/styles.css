@@ -80,6 +80,12 @@
   gap: 8px;
 }
 
+.range-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
 .range {
   flex: 1;
   height: 6px;
@@ -87,6 +93,21 @@
   outline: none;
 }
 
+/* Playback Speed range color */
+.range {
+  -webkit-appearance: none;
+  appearance: none;
+  background: rgb(226, 62, 117);
+}
+
+.range::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 13px;
+  height: 13px;
+  background: rgb(226, 62, 117);
+  border-radius: 50%;
+}
 
 /* Buttons */
 .btn {
