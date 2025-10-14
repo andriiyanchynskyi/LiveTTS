@@ -8,7 +8,7 @@ Production-ready FastAPI service and simple web UI for text-to-speech powered by
 - **Multilingual XTTS v2**: 16 languages: en, es, fr, de, it, pt, pl, tr, ru, nl, cs, ar, zh-cn, hu, ko, ja
 - **Fine‑tuned voices from disk**: Drop model assets under `volumes/voices/<lang>/<voice>/` with `model.pth`, `config.json`, `vocab.json`, `reference.wav`.
 - **Temporary zero‑shot voice**: Upload a reference WAV via API/UI; inference runs using the bundled base at `volumes/voices/xtts_v2/`.
-- **Speed control**: 0.5×–2.0× tempo (pitch‑preserving, SoX‑based).
+- **Speed control**: 0.5×–2.0× tempo (XTTS Native or pitch‑preserving SoX‑based as option).
 - **Audio post‑processing (optional)**: `denoise`, `normalize`, `equalize`, `highpass`, `lowpass`.
 - **GPU acceleration**: CUDA if available; optional DeepSpeed ops when supported by environment.
 - **Artifact persistence**: Outputs saved to `volumes/outputs/` and served via static endpoint `/files/*`.
