@@ -2,7 +2,7 @@ import uuid
 import os
 import asyncio
 from pathlib import Path
-from typing import Dict, Optional
+from typing import Dict, Optional, List, Any
 
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
@@ -16,9 +16,9 @@ from ..utils import (
     get_inference_param, 
     validate_language, 
     load_voice_config,
-    should_enable_text_splitting, 
-    validate_text_splitting_configuration,
- )
+    split_text_by_sentences,
+    validate_sentence_boundaries,
+)
 
 
 def create_router(
@@ -34,6 +34,7 @@ def create_router(
     router = APIRouter()
 
     INFERENCE_TIMEOUT_SEC = float(os.getenv("INFERENCE_TIMEOUT_SEC", "360"))
+    USE_PRECISE_SPACY_SPLITTING = os.getenv("USE_PRECISE_SPACY_SPLITTING", "true").lower() in {"true", "1", "yes", "on"}
 
     INFERENCE_DEFAULTS = {
         "temperature": 0.7,
@@ -44,18 +45,73 @@ def create_router(
         "speed": 1.0,
     }
 
-    def build_params(voice_cfg: dict) -> dict:
-        params = {k: get_inference_param(k, voice_cfg, INFERENCE_DEFAULTS) for k in INFERENCE_DEFAULTS}
+    def _validate_text_input(text: str) -> str:
+        """Validate and normalize text input."""
+        if not text or not text.strip():
+            raise HTTPException(status_code=400, detail="Text cannot be empty")
+        return text.strip()
+
+    def _validate_speed_parameter(speed: Optional[float]) -> float:
+        """Validate speed parameter."""
+        target_speed = float(speed or 1.0)
+        if not (0.5 <= target_speed <= 2.0):
+            raise HTTPException(status_code=400, detail=f"Speed must be between 0.5 and 2.0, got {target_speed}")
+        return target_speed
+
+    def _validate_voice_files(voice) -> None:
+        """Validate that all required voice files exist."""
+        ref = Path(voice.voice_path)
+        mdl = Path(voice.m_path)
+        voc = Path(voice.vocab_path)
         
+        if not ref.exists():
+            raise HTTPException(status_code=400, detail=f"reference.wav not found for voice '{voice.name}'")
+        if not mdl.exists():
+            raise HTTPException(status_code=400, detail=f"model.pth not found for voice '{voice.name}'")
+        if not voc.exists():
+            raise HTTPException(status_code=400, detail=f"vocab.json not found for voice '{voice.name}'")
+
+    def build_params(voice_cfg: dict) -> dict:
+        """Build inference parameters from voice config with defaults."""
+        params = {k: get_inference_param(k, voice_cfg, INFERENCE_DEFAULTS) for k in INFERENCE_DEFAULTS}
         return params
 
-    def resolve_text_splitting(text: str, language: str) -> bool:
+    def should_split_text(text: str, language: str) -> bool:
+        """Determine if text should be split based on length and spaCy availability."""
         text_length = len(text)
-        enable = should_enable_text_splitting(text_length, language)
-        validate_text_splitting_configuration(text_length, language, enable)
-        return enable
+        
+        # Always split if text is long enough and spaCy is available
+        if text_length > 249:
+            from ..utils.spacy_utils import _SPACY_AVAILABLE, _SPACY_MODELS
+            if _SPACY_AVAILABLE and language in _SPACY_MODELS:
+                return True
+            else:
+                logger.warning(f"Text is {text_length} chars but spaCy not available for '{language}'")
+        
+        logger.info(f"Text splitting disabled: {text_length} chars")
+        return False
 
-    def run_inference(model, text: str, language: str, gpt_cond_latent, speaker_embedding, params: dict, enable_split: bool):
+    def split_text_precisely(text: str, language: str, max_length: int = 250) -> List[str]:
+        """
+        Split text using precise spaCy sentence boundary detection.
+        This replaces XTTS internal text splitting for better control.
+        """
+        text_length = len(text)
+        
+        # If text is short enough, don't split
+        if text_length <= max_length:
+            logger.info(f"Text length {text_length} <= {max_length}, no splitting needed")
+            return [text]
+        
+        # Use our precise spaCy splitting
+        segments = split_text_by_sentences(text, language, max_length)
+        
+        return segments
+
+    def _run_model_inference(model, text: str, language: str, gpt_cond_latent, speaker_embedding, params: dict, enable_text_splitting: bool = False):
+        """
+        Centralized model inference with consistent parameter handling.
+        """
         return model.inference(
             text,
             language,
@@ -67,9 +123,72 @@ def create_router(
             top_k=params["top_k"],
             top_p=params["top_p"],
             speed=params["speed"],
-            #speed=1.0,
-            enable_text_splitting=enable_split,
+            enable_text_splitting=enable_text_splitting,
         )
+
+    def run_inference_single_segment(model, text: str, language: str, gpt_cond_latent, speaker_embedding, params: dict):
+        """
+        Run inference on a single text segment without internal text splitting.
+        """
+        return _run_model_inference(model, text, language, gpt_cond_latent, speaker_embedding, params, enable_text_splitting=False)
+
+    def run_inference_with_precise_splitting(model, text: str, language: str, gpt_cond_latent, speaker_embedding, params: dict):
+        """
+        Run inference with precise spaCy-based text splitting.
+        """
+        # Split text using our precise spaCy implementation
+        segments = split_text_precisely(text, language)
+        
+        if len(segments) == 1:
+            # Single segment, run normal inference
+            logger.info("Single segment, running normal inference")
+            return run_inference_single_segment(model, segments[0], language, gpt_cond_latent, speaker_embedding, params)
+        
+        # Multiple segments, process each separately and concatenate
+        all_wavs = []
+        
+        for i, segment in enumerate(segments):
+            logger.info(f"Processing segment {i+1}/{len(segments)}: {len(segment)} chars")
+            
+            try:
+                # Run inference on this segment
+                segment_result = run_inference_single_segment(
+                    model, segment, language, gpt_cond_latent, speaker_embedding, params
+                )
+                
+                segment_wav = segment_result.get("wav")
+                if segment_wav is None:
+                    logger.error(f"Segment {i+1} returned no audio")
+                    continue
+                
+                all_wavs.append(segment_wav)
+                logger.info(f"Segment {i+1} processed successfully")
+                
+            except Exception as e:
+                logger.error(f"Error processing segment {i+1}: {e}")
+                # Continue with other segments
+                continue
+        
+        if not all_wavs:
+            raise RuntimeError("All segments failed to process")
+        
+        # Concatenate all audio segments
+        if len(all_wavs) == 1:
+            final_wav = all_wavs[0]
+        else:
+            logger.info(f"Concatenating {len(all_wavs)} audio segments")
+            final_wav = np.concatenate(all_wavs, axis=0)
+        
+        logger.info(f"Precise splitting completed: {len(segments)} segments -> {len(final_wav)} samples")
+        return {"wav": final_wav}
+
+    def run_inference(model, text: str, language: str, gpt_cond_latent, speaker_embedding, params: dict, enable_split: bool):
+        """Run inference with optional text splitting."""
+        if enable_split and USE_PRECISE_SPACY_SPLITTING:
+            return run_inference_with_precise_splitting(model, text, language, gpt_cond_latent, speaker_embedding, params)
+        else:
+            # Use XTTS internal splitting or no splitting
+            return _run_model_inference(model, text, language, gpt_cond_latent, speaker_embedding, params, enable_text_splitting=enable_split)
 
     async def run_inference_with_timeout(model, text: str, language: str, gpt_cond_latent, speaker_embedding, params: dict, enable_split: bool):
         return await asyncio.wait_for(
@@ -170,10 +289,8 @@ def create_router(
     ) -> tuple[str, str]:  # (audio_url, filename)
         """Shared synthesis pipeline for regular and zero-shot voices."""
         
-        # Validate and normalize inputs
-        target_speed = float(speed or 1.0)
-        if not (0.5 <= target_speed <= 2.0):
-            raise HTTPException(status_code=400, detail=f"Speed must be between 0.5 and 2.0, got {target_speed}")
+        # Validate and normalize inputs using helper functions
+        target_speed = _validate_speed_parameter(speed)
         
         # Inference parameters
         params = build_params(voice_cfg)
@@ -190,7 +307,7 @@ def create_router(
             logger.info(f"Native XTTS speed mode: speed={params['speed']}")
 
         # Text splitting
-        enable_splitting = resolve_text_splitting(text, language)
+        enable_splitting = should_split_text(text, language)
         
         # Inference
         try:
@@ -232,38 +349,66 @@ def create_router(
         filename: str
         voice_used: str
 
+    class TextSplittingTestRequest(BaseModel):
+        text: str = Field(..., min_length=1, max_length=10000)
+        language: str = "en"
+        max_length: int = Field(default=250, ge=50, le=1000)
+
+    class TextSplittingTestResponse(BaseModel):
+        original_text: str
+        language: str
+        segments: List[str]
+        segment_count: int
+        total_chars: int
+        validation_result: Dict[str, Any]
+
+    @router.post("/test-text-splitting", response_model=TextSplittingTestResponse)
+    async def test_text_splitting(request: TextSplittingTestRequest):
+        """Test precise spaCy text splitting without synthesis."""
+        logger.info(f"Testing text splitting: lang='{request.language}', text='{request.text[:60]}...'")
+        
+        # Get segments using our precise splitting
+        segments = split_text_precisely(request.text, request.language, request.max_length)
+        
+        # Validate sentence boundaries
+        validation_result = validate_sentence_boundaries(request.text, request.language)
+        
+        return TextSplittingTestResponse(
+            original_text=request.text,
+            language=request.language,
+            segments=segments,
+            segment_count=len(segments),
+            total_chars=len(request.text),
+            validation_result=validation_result
+        )
+
     @router.post("/synthesize", response_model=SynthesisResponse)
     async def synthesize_text(request: SynthesisRequest):
         logger.info(f"Synthesis: voice='{request.voice_name}', lang='{request.language}', text='{request.text[:60]}...'")
-        if not request.text or not request.text.strip():
-            raise HTTPException(status_code=400, detail="Text cannot be empty")
+        
+        # Validate text input using helper function
+        text = _validate_text_input(request.text)
 
         voices = [v for v in list_voices_func() if not v.is_zero_shot]
         voice = next((v for v in voices if v.name == request.voice_name), None)
         if not voice:
             raise HTTPException(status_code=404, detail=f"Voice '{request.voice_name}' not found in fine-tuned voices")
-         # Validate files
-        ref = Path(voice.voice_path)
-        mdl = Path(voice.m_path)
-        voc = Path(voice.vocab_path)
-        if not ref.exists():
-            raise HTTPException(status_code=400, detail=f"reference.wav not found for voice '{voice.name}'")
-        if not mdl.exists():
-            raise HTTPException(status_code=400, detail=f"model.pth not found for voice '{voice.name}'")
-        if not voc.exists():
-            raise HTTPException(status_code=400, detail=f"vocab.json not found for voice '{voice.name}'")
+        
+        # Validate files using helper function
+        _validate_voice_files(voice)
 
         voice_cfg = load_voice_config(voice.config_path)
         effective_lang = validate_language(request.language, voice_cfg, supported_languages)
         logger.info(f"Effective language: {effective_lang}")
+        
         # Load model
         model = load_xtts_func(voice.config_path, voice.m_path, voice.vocab_path)
         # Conditioning latents from voice references
-        gpt_cond_latent, speaker_embedding = model.get_conditioning_latents(audio_path=[str(ref)])
+        gpt_cond_latent, speaker_embedding = model.get_conditioning_latents(audio_path=[str(voice.voice_path)])
 
         # SHARED PIPELINE
         audio_url, filename = await run_synthesis_pipeline(
-            model, request.text, effective_lang, gpt_cond_latent, speaker_embedding,
+            model, text, effective_lang, gpt_cond_latent, speaker_embedding,
             voice_cfg, request.speed, request.enhancements
         )
 
@@ -274,8 +419,10 @@ def create_router(
     @router.post("/synthesize/zero-shot", response_model=SynthesisResponse)
     async def synthesize_zero_shot(request: ZeroShotSynthesisRequest):
         logger.info(f"Zero-shot: lang='{request.language}', text='{request.text[:60]}...'")
-        if not request.text or not request.text.strip():
-            raise HTTPException(status_code=400, detail="Text cannot be empty")
+        
+        # Validate text input using helper function
+        text = _validate_text_input(request.text)
+        
         if not custom_ref_path.exists():
             raise HTTPException(status_code=400, detail="No zero-shot reference uploaded")
 
@@ -288,7 +435,8 @@ def create_router(
         model = load_xtts_func(str(base_cfg), str(base_m), str(base_v))
         gpt_cond_latent, speaker_embedding = model.get_conditioning_latents(audio_path=[str(custom_ref_path)])
 
-        effective_lang = (request.language or "en").strip().lower()
+        # Normalize language using helper function
+        effective_lang = request.language.strip().lower() if request.language else "en"
         if effective_lang not in [l.lower() for l in supported_languages]:
             effective_lang = "en"
 
@@ -300,7 +448,7 @@ def create_router(
 
         # SHARED PIPELINE
         audio_url, filename = await run_synthesis_pipeline(
-            model, request.text, effective_lang, gpt_cond_latent, speaker_embedding,
+            model, text, effective_lang, gpt_cond_latent, speaker_embedding,
             base_cfg_json, request.speed, request.enhancements
         )
 

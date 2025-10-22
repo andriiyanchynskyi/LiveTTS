@@ -16,15 +16,30 @@ def create_router(voices_dir, custom_ref_path, custom_state_path, zero_shot_base
     router = APIRouter()
     logger = logging.getLogger(__name__)
 
+    def _get_voices():
+        """Helper function to get voices list."""
+        return list_voices(voices_dir, custom_ref_path, custom_state_path, zero_shot_base, supported_languages)
+
+    def _validate_file_upload(file: UploadFile) -> bytes:
+        """Validate uploaded file and return data."""
+        if file.content_type not in ("audio/wav", "audio/x-wav", "audio/wave"):
+            raise HTTPException(status_code=400, detail="Only WAV files are accepted")
+        
+        data = file.read()
+        if len(data) > 20 * 1024 * 1024:
+            raise HTTPException(status_code=400, detail="File too large (max 20MB)")
+        
+        return data
+
     @router.get("/voices", response_model=VoiceListResponse)
     async def get_voices():
-        voices = list_voices(voices_dir, custom_ref_path, custom_state_path, zero_shot_base, supported_languages)
+        voices = _get_voices()
         logger.info("[voices] listed voices: count=%d", len(voices))
         return VoiceListResponse(voices=voices, total_count=len(voices))
 
     @router.post("/voices/refresh")
     async def refresh_voices():
-        voices = list_voices(voices_dir, custom_ref_path, custom_state_path, zero_shot_base, supported_languages)
+        voices = _get_voices()
         logger.info("[voices] refresh requested: found=%d", len(voices))
         return {"message": "Voice list refreshed", "voices_found": len(voices), "voices": [v.name for v in voices]}
 
@@ -37,11 +52,7 @@ def create_router(voices_dir, custom_ref_path, custom_state_path, zero_shot_base
     # -------- Zero-shot: upload & clear --------
     @router.post("/custom-voice/upload")
     async def upload_custom_voice(file: UploadFile = File(...)):
-        if file.content_type not in ("audio/wav", "audio/x-wav", "audio/wave"):
-            raise HTTPException(status_code=400, detail="Only WAV files are accepted")
-        data = await file.read()
-        if len(data) > 20 * 1024 * 1024:
-            raise HTTPException(status_code=400, detail="File too large (max 20MB)")
+        data = _validate_file_upload(file)
 
         try:
             with open(custom_ref_path, "wb") as f:
@@ -81,7 +92,7 @@ def create_router(voices_dir, custom_ref_path, custom_state_path, zero_shot_base
 
     @router.get("/voices/{voice_name}", response_model=RepoVoiceModel)
     async def get_voice(voice_name: str):
-        voices = list_voices(voices_dir, custom_ref_path, custom_state_path, zero_shot_base, supported_languages)
+        voices = _get_voices()
         voice = get_voice_by_name(voices, voice_name)
         if not voice:
             raise HTTPException(status_code=404, detail=f"Voice '{voice_name}' not found")
@@ -90,10 +101,11 @@ def create_router(voices_dir, custom_ref_path, custom_state_path, zero_shot_base
 
     @router.get("/voices/{voice_name}/languages")
     async def get_voice_languages(voice_name: str):
-        voices = list_voices(voices_dir, custom_ref_path, custom_state_path, zero_shot_base, supported_languages)
+        voices = _get_voices()
         voice = get_voice_by_name(voices, voice_name)
         if not voice:
             raise HTTPException(status_code=404, detail=f"Voice '{voice_name}' not found")
+        
         if voice.is_zero_shot:
             result = {
                 "voice_name": voice_name,
@@ -104,6 +116,7 @@ def create_router(voices_dir, custom_ref_path, custom_state_path, zero_shot_base
             }
             logger.info("[voices] languages for zero-shot voice=%s: %d", voice_name, len(result["supported_languages"]))
             return result
+        
         try:
             cfg = load_voice_config(voice.config_path)
             result = {

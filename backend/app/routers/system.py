@@ -1,12 +1,22 @@
 from fastapi import APIRouter
+from pydantic import BaseModel, Field
 import torch
 
-from ..utils.spacy_utils import _SPACY_AVAILABLE, _SPACY_MODELS
+from ..utils.spacy_utils import (
+    _SPACY_AVAILABLE, 
+    _SPACY_MODELS, 
+    validate_sentence_boundaries,
+    split_text_by_sentences
+)
 from ..enhancements import ENHANCEMENTS
 
 
 def create_router(voices_provider, gpu_info_provider):
     router = APIRouter()
+
+    class TextValidationRequest(BaseModel):
+        text: str
+        language: str = Field(default="en", description="Language code (en, es, fr, de, it, pt, pl, ru, nl, cs, ar, zn-cn, hu, ko, ja)")
 
     @router.get("/health")
     async def health_check():
@@ -38,10 +48,33 @@ def create_router(voices_provider, gpu_info_provider):
 
     @router.get("/spacy")
     async def spacy_info():
+        import os
+        use_precise_splitting = os.getenv("USE_PRECISE_SPACY_SPLITTING", "true").lower() in {"true", "1", "yes", "on"}
+        
         return {
             "spacy_available": _SPACY_AVAILABLE,
             "loaded_models": _SPACY_MODELS,
-            "total_models": len(_SPACY_MODELS)
+            "total_models": len(_SPACY_MODELS),
+            "precise_splitting_enabled": use_precise_splitting,
+            "splitting_method": "precise_spacy" if use_precise_splitting else "xtts_internal"
+        }
+
+    @router.post("/validate-text-splitting")
+    async def validate_text_splitting(request: TextValidationRequest):
+        """Validate spaCy sentence boundary detection for debugging."""
+        result = validate_sentence_boundaries(request.text, request.language)
+        return result
+
+    @router.post("/split-text")
+    async def split_text(request: TextValidationRequest):
+        """Split text using spaCy sentence boundaries for debugging."""
+        segments = split_text_by_sentences(request.text, request.language)
+        return {
+            "original_text": request.text,
+            "language": request.language,
+            "segments": segments,
+            "segment_count": len(segments),
+            "total_chars": len(request.text)
         }
 
     @router.get("/enhancements")

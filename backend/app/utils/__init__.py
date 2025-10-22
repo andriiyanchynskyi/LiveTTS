@@ -1,5 +1,11 @@
 from .core import json_load, json_save, load_voice_config, validate_language, get_inference_param
-from .spacy_utils import should_enable_text_splitting, validate_text_splitting_configuration
+from .spacy_utils import (
+    should_enable_text_splitting, 
+    validate_text_splitting_configuration,
+    split_text_by_sentences,
+    validate_sentence_boundaries,
+    get_spacy_model
+)
 
 __all__ = [
     "json_load",
@@ -9,4 +15,7 @@ __all__ = [
     "get_inference_param",
     "should_enable_text_splitting",
     "validate_text_splitting_configuration",
+    "split_text_by_sentences",
+    "validate_sentence_boundaries",
+    "get_spacy_model",
 ]
