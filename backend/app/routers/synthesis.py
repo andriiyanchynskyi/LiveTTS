@@ -36,6 +36,12 @@ def create_router(
     INFERENCE_TIMEOUT_SEC = float(os.getenv("INFERENCE_TIMEOUT_SEC", "360"))
     USE_PRECISE_SPACY_SPLITTING = os.getenv("USE_PRECISE_SPACY_SPLITTING", "true").lower() in {"true", "1", "yes", "on"}
 
+    # Segmentation configuration variables
+    MAX_RETRIES = 7
+    # Base duration: ~0.4s per word at speed 1.0
+    BASE_DURATION_PER_WORD = 0.4  
+    PAD_DURATION = 0.1
+
     INFERENCE_DEFAULTS = {
         "temperature": 0.7,
         "length_penalty": 1.0,
@@ -75,6 +81,10 @@ def create_router(
         """Build inference parameters from voice config with defaults."""
         params = {k: get_inference_param(k, voice_cfg, INFERENCE_DEFAULTS) for k in INFERENCE_DEFAULTS}
         return params
+    # Calculate expected duration based on word count and inference speed.
+    def calculate_expected_duration(word_count: int, inference_speed: float = 1.0) -> float:
+        """Calculate expected duration based on word count and inference speed."""
+        return (word_count * BASE_DURATION_PER_WORD) / inference_speed
 
     def should_split_text(text: str, language: str) -> bool:
         """Determine if text should be split based on length and spaCy availability."""
@@ -91,7 +101,7 @@ def create_router(
         logger.info(f"Text splitting disabled: {text_length} chars")
         return False
 
-    def split_text_precisely(text: str, language: str, max_length: int = 250) -> List[str]:
+    def split_text(text: str, language: str, max_length: int = 250) -> List[str]:
         """
         Split text using precise spaCy sentence boundary detection.
         This replaces XTTS internal text splitting for better control.
@@ -132,12 +142,28 @@ def create_router(
         """
         return _run_model_inference(model, text, language, gpt_cond_latent, speaker_embedding, params, enable_text_splitting=False)
 
-    def run_inference_with_precise_splitting(model, text: str, language: str, gpt_cond_latent, speaker_embedding, params: dict):
+    def validate_segment_duration(segment_wav: np.ndarray, segment_text: str, sample_rate: int, inference_speed: float = 1.0, min_duration_ratio: float = 0.89) -> bool:
+        """
+        Validate that segment duration meets minimum expectations.
+        
+        Returns:
+            True if duration is acceptable, False if too short
+        """
+        word_count = len(segment_text.split())
+        
+        expected_duration = calculate_expected_duration(word_count, inference_speed)
+        actual_duration = len(segment_wav) / sample_rate
+        duration_ratio = actual_duration / expected_duration if expected_duration > 0 else 1.0
+        logger.info(f"Duration validation: {actual_duration:.2f}s actual vs {expected_duration:.2f}s expected (ratio: {duration_ratio:.2f}, speed: {inference_speed})")
+        
+        return duration_ratio >= min_duration_ratio
+
+    def run_inference_splitting(model, text: str, language: str, gpt_cond_latent, speaker_embedding, params: dict):
         """
         Run inference with precise spaCy-based text splitting.
         """
         # Split text using our precise spaCy implementation
-        segments = split_text_precisely(text, language)
+        segments = split_text(text, language)
         
         if len(segments) == 1:
             # Single segment, run normal inference
@@ -146,38 +172,88 @@ def create_router(
         
         # Multiple segments, process each separately and concatenate
         all_wavs = []
+        sample_rate = int(params.get("sample_rate", 24000))  # Default sample rate
         
         for i, segment in enumerate(segments):
             logger.info(f"Processing segment {i+1}/{len(segments)}: {len(segment)} chars")
             
-            try:
-                # Run inference on this segment
-                segment_result = run_inference_single_segment(
-                    model, segment, language, gpt_cond_latent, speaker_embedding, params
-                )
-                
-                segment_wav = segment_result.get("wav")
-                if segment_wav is None:
-                    logger.error(f"Segment {i+1} returned no audio")
-                    continue
-                
+            segment_wav = None
+            best_wav = None
+            best_duration = 0
+            
+            for retry in range(MAX_RETRIES + 1):
+                try:
+                    # Run inference on this segment
+                    segment_result = run_inference_single_segment(
+                        model, segment, language, gpt_cond_latent, speaker_embedding, params
+                    )
+                    
+                    current_wav = segment_result.get("wav")
+                    if current_wav is None:
+                        logger.error(f"Segment {i+1} returned no audio (attempt {retry+1})")
+                        continue
+                    
+                    # Calculate duration for comparison
+                    current_duration = len(current_wav) / sample_rate
+                    
+                    # Keep track of the longest segment
+                    if current_duration > best_duration:
+                        best_wav = current_wav
+                        best_duration = current_duration
+                        logger.info(f"Segment {i+1} new best duration: {current_duration:.2f}s (attempt {retry+1})")
+                    
+                    # Validate duration
+                    inference_speed = params.get("speed", 1.0)
+                    if validate_segment_duration(current_wav, segment, sample_rate, inference_speed):
+                        logger.info(f"Segment {i+1} duration validated successfully")
+                        segment_wav = current_wav
+                        break
+                    else:
+                        logger.warning(f"Segment {i+1} duration too short (attempt {retry+1})")
+                        if retry < MAX_RETRIES:
+                            logger.info(f"Retrying segment {i+1} (attempt {retry+2})")
+                            continue
+                        else:
+                            logger.warning(f"Segment {i+1} duration still too short after {MAX_RETRIES} retries, using longest segment")
+                            segment_wav = best_wav
+                            break
+                    
+                except Exception as e:
+                    logger.error(f"Error processing segment {i+1} (attempt {retry+1}): {e}")
+                    if retry < MAX_RETRIES:
+                        logger.info(f"Retrying segment {i+1} (attempt {retry+2})")
+                        continue
+                    else:
+                        logger.error(f"Segment {i+1} failed after {MAX_RETRIES} retries")
+                        break
+            
+            if segment_wav is not None:
                 all_wavs.append(segment_wav)
                 logger.info(f"Segment {i+1} processed successfully")
-                
-            except Exception as e:
-                logger.error(f"Error processing segment {i+1}: {e}")
-                # Continue with other segments
+            else:
+                logger.error(f"Segment {i+1} failed to produce audio")
                 continue
         
         if not all_wavs:
             raise RuntimeError("All segments failed to process")
         
-        # Concatenate all audio segments
+        # Concatenate all audio segments with padding
         if len(all_wavs) == 1:
             final_wav = all_wavs[0]
         else:
-            logger.info(f"Concatenating {len(all_wavs)} audio segments")
-            final_wav = np.concatenate(all_wavs, axis=0)
+            logger.info(f"Concatenating {len(all_wavs)} audio segments with padding")
+            
+            # Add padding between segments
+            padded_wavs = []
+            for j, wav in enumerate(all_wavs):
+                padded_wavs.append(wav)
+                # Add padding except after the last segment
+                if j < len(all_wavs) - 1:
+                    pad_samples = int(PAD_DURATION * sample_rate)
+                    pad = np.zeros(pad_samples, dtype=wav.dtype)
+                    padded_wavs.append(pad)
+            
+            final_wav = np.concatenate(padded_wavs, axis=0)
         
         logger.info(f"Precise splitting completed: {len(segments)} segments -> {len(final_wav)} samples")
         return {"wav": final_wav}
@@ -185,7 +261,7 @@ def create_router(
     def run_inference(model, text: str, language: str, gpt_cond_latent, speaker_embedding, params: dict, enable_split: bool):
         """Run inference with optional text splitting."""
         if enable_split and USE_PRECISE_SPACY_SPLITTING:
-            return run_inference_with_precise_splitting(model, text, language, gpt_cond_latent, speaker_embedding, params)
+            return run_inference_splitting(model, text, language, gpt_cond_latent, speaker_embedding, params)
         else:
             # Use XTTS internal splitting or no splitting
             return _run_model_inference(model, text, language, gpt_cond_latent, speaker_embedding, params, enable_text_splitting=enable_split)
@@ -309,6 +385,15 @@ def create_router(
         # Text splitting
         enable_splitting = should_split_text(text, language)
         
+        # Log total text length and expected duration before inference
+        total_text_length = len(text)
+        word_count = len(text.split())
+        inference_speed = params.get("speed", 1.0)
+        expected_total_duration = calculate_expected_duration(word_count, inference_speed)
+        
+        logger.info(f"Total text length: {total_text_length} characters, {word_count} words")
+        logger.info(f"Expected total duration: {expected_total_duration:.2f} seconds (speed: {inference_speed})")
+        
         # Inference
         try:
             out = await run_inference_with_timeout(
@@ -324,24 +409,28 @@ def create_router(
         # Determine sample rate
         sample_rate = int(voice_cfg.get("audio", {}).get("output_sample_rate", 24000))
         
+        # Add sample rate to params for duration validation
+        params["sample_rate"] = sample_rate
+        
         # Handle speed and enhancements
         wav_process = process_audio_speed_and_enhancements(wav, sample_rate, target_speed, enhancements)
         
         # Save
         return save_synthesis_result(wav_process, sample_rate)
 
-    class SynthesisRequest(BaseModel):
+    class BaseSynthesisRequest(BaseModel):
         text: str = Field(..., min_length=1, max_length=10000)
+        speed: Optional[float] = Field(default=1.0, ge=0.5, le=2.0)
+        enhancements: Optional[Dict[str, bool]] = Field(default_factory=dict)
+        
+    class SynthesisRequest(BaseSynthesisRequest):
+        """Synthesis request for fine-tuned voices."""
         voice_name: str
         language: Optional[str] = None
-        speed: Optional[float] = Field(default=1.0, ge=0.5, le=2.0)
-        enhancements: Optional[Dict[str, bool]] = Field(default_factory=dict)
 
-    class ZeroShotSynthesisRequest(BaseModel):
-        text: str = Field(..., min_length=1, max_length=10000)
+    class ZeroShotSynthesisRequest(BaseSynthesisRequest):
+        """Synthesis request for zero-shot voices."""
         language: str
-        speed: Optional[float] = Field(default=1.0, ge=0.5, le=2.0)
-        enhancements: Optional[Dict[str, bool]] = Field(default_factory=dict)
 
     class SynthesisResponse(BaseModel):
         success: bool
@@ -368,7 +457,7 @@ def create_router(
         logger.info(f"Testing text splitting: lang='{request.language}', text='{request.text[:60]}...'")
         
         # Get segments using our precise splitting
-        segments = split_text_precisely(request.text, request.language, request.max_length)
+        segments = split_text(request.text, request.language, request.max_length)
         
         # Validate sentence boundaries
         validation_result = validate_sentence_boundaries(request.text, request.language)

@@ -16,7 +16,7 @@ def create_router(voices_provider, gpu_info_provider):
 
     class TextValidationRequest(BaseModel):
         text: str
-        language: str = Field(default="en", description="Language code (en, es, fr, de, it, pt, pl, ru, nl, cs, ar, zn-cn, hu, ko, ja)")
+        language: str = Field(default="en", description="Language code (en, es, fr, de, it, pt, pl, tr, ru, nl, cs, ar, zn-cn, hu, ko, ja)")
 
     @router.get("/health")
     async def health_check():
