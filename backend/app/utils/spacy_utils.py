@@ -9,7 +9,7 @@ _SPACY_AVAILABLE = False
 _SPACY_MODELS: Dict[str, str] = {}
 _SPACY_LOADED_MODELS: Dict[str, 'spacy.Language'] = {}
 _SPACY_LOAD_RETRIES = max(0, int(os.getenv("SPACY_LOAD_RETRIES", "0")))
-_SPACY_LOAD_RETRY_DELAY_SEC = max(0.0, float(os.getenv("SPACY_LOAD_RETRY_DELAY_SEC", "0.25")))
+_SPACY_LOAD_RETRY_DELAY_SEC = max(0.0, float(os.getenv("SPACY_LOAD_RETRY_DELAY_SEC", "0.10")))
 
 try:
     import spacy
