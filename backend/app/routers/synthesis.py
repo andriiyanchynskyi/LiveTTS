@@ -37,13 +37,13 @@ def create_router(
    
     _INFERENCE_EXECUTOR = concurrent.futures.ThreadPoolExecutor(max_workers=1)
 
-    INFERENCE_TIMEOUT_SEC = float(os.getenv("INFERENCE_TIMEOUT_SEC", "520"))
+    INFERENCE_TIMEOUT_SEC = float(os.getenv("INFERENCE_TIMEOUT_SEC", "2520"))
     USE_PRECISE_SPACY_SPLITTING = os.getenv("USE_PRECISE_SPACY_SPLITTING", "true").lower() in {"true", "1", "yes", "on"}
     
     # Threshold for text splitting decision
-    XTTS_TEXT_SPLITTER_THRESHOLD = 240
+    XTTS_TEXT_SPLITTER_THRESHOLD = 200
     # Segmentation configuration variables
-    MAX_RETRIES = 8
+    MAX_RETRIES = 4
     # Base duration: ~0.4s per word at speed 1.0
     BASE_DURATION_PER_WORD = 0.4
 
@@ -102,7 +102,7 @@ def create_router(
         logger.info(f"Text splitting disabled: {text_length} chars <= {XTTS_TEXT_SPLITTER_THRESHOLD}")
         return False
 
-    def split_text(text: str, language: str, max_length: int = 120) -> List[str]:
+    def split_text(text: str, language: str, max_length: int = 70) -> List[str]:
         """
         Split text using precise spaCy sentence boundary detection.
         This replaces XTTS internal text splitting for better control.
@@ -143,7 +143,7 @@ def create_router(
         """
         return _run_model_inference(model, text, language, gpt_cond_latent, speaker_embedding, params, enable_text_splitting=False)
 
-    def validate_segment_duration(segment_wav: np.ndarray, segment_text: str, sample_rate: int, inference_speed: float = 1.0, min_duration_ratio: float = 0.8, max_duration_ratio: float = 1.5) -> bool:
+    def validate_segment_duration(segment_wav: np.ndarray, segment_text: str, sample_rate: int, inference_speed: float = 1.0, min_duration_ratio: float = 0.80, max_duration_ratio: float = 1.5) -> bool:
         """
         Validate that segment duration meets expectations (not too short or too long).
         
@@ -251,7 +251,7 @@ def create_router(
             final_wav = all_wavs[0]
         else:
             logger.info(f"Concatenating {len(all_wavs)} audio segments with crossfade")
-            final_wav = concat_with_crossfade(all_wavs, sample_rate, crossfade_s=0.10)
+            final_wav = concat_with_crossfade(all_wavs, sample_rate, crossfade_s=0.20)
         
         logger.info(f"Precise splitting completed: {len(segments)} segments -> {len(final_wav)} samples")
         return {"wav": final_wav}
@@ -281,7 +281,7 @@ def create_router(
             timeout=INFERENCE_TIMEOUT_SEC,
         )
 
-    def concat_with_crossfade(wav_list: List[np.ndarray], sample_rate: int, crossfade_s: float = 0.10) -> np.ndarray:
+    def concat_with_crossfade(wav_list: List[np.ndarray], sample_rate: int, crossfade_s: float = 0.20) -> np.ndarray:
         """Concatenate audio segments with smooth crossfade between them."""
         if not wav_list:
             return np.array([], dtype=np.float32)
@@ -443,7 +443,7 @@ def create_router(
         return save_synthesis_result(wav_process, sample_rate)
 
     class BaseSynthesisRequest(BaseModel):
-        text: str = Field(..., min_length=1, max_length=10000)
+        text: str = Field(..., min_length=3, max_length=50000)
         speed: Optional[float] = Field(default=1.0, ge=0.5, le=2.0)
         enhancements: Optional[Dict[str, bool]] = Field(default_factory=dict)
         
@@ -463,9 +463,9 @@ def create_router(
         voice_used: str
 
     class TextSplittingTestRequest(BaseModel):
-        text: str = Field(..., min_length=1, max_length=10000)
+        text: str = Field(..., min_length=70, max_length=120)
         language: str = "en"
-        max_length: int = Field(default=80, ge=20, le=250)
+        max_length: int = Field(default=70, ge=30, le=120)
 
     class TextSplittingTestResponse(BaseModel):
         original_text: str

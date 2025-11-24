@@ -20,12 +20,12 @@ def create_router(voices_dir, custom_ref_path, custom_state_path, zero_shot_base
         """Helper function to get voices list."""
         return list_voices(voices_dir, custom_ref_path, custom_state_path, zero_shot_base, supported_languages)
 
-    def _validate_file_upload(file: UploadFile) -> bytes:
+    async def _validate_file_upload(file: UploadFile) -> bytes:
         """Validate uploaded file and return data."""
         if file.content_type not in ("audio/wav", "audio/x-wav", "audio/wave"):
             raise HTTPException(status_code=400, detail="Only WAV files are accepted")
         
-        data = file.read()
+        data = await file.read()
         if len(data) > 20 * 1024 * 1024:
             raise HTTPException(status_code=400, detail="File too large (max 20MB)")
         
@@ -52,7 +52,7 @@ def create_router(voices_dir, custom_ref_path, custom_state_path, zero_shot_base
     # -------- Zero-shot: upload & clear --------
     @router.post("/custom-voice/upload")
     async def upload_custom_voice(file: UploadFile = File(...)):
-        data = _validate_file_upload(file)
+        data = await _validate_file_upload(file)
 
         try:
             with open(custom_ref_path, "wb") as f:
